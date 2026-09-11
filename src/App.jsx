@@ -2,51 +2,51 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 // --- Data ---
 const STOCKS = [
-  { id: "2330", name: "台積電", sector: "半導體", price: 2445, prev: 2410, volume: 38420, pe: 28.5, dy: 1.8, k: 72, d: 65, rsi: 68, macd: 12.5, foreignBuy: 8500, trustBuy: 1200, dealerBuy: -300, ma5: 2420, ma20: 2380, ma60: 2310 },
-  { id: "2317", name: "鴻海", sector: "電子代工", price: 235, prev: 231, volume: 52100, pe: 12.1, dy: 4.2, k: 78, d: 70, rsi: 71, macd: 3.2, foreignBuy: 12000, trustBuy: 3500, dealerBuy: 800, ma5: 232, ma20: 225, ma60: 218 },
-  { id: "2454", name: "聯發科", sector: "IC設計", price: 1890, prev: 1870, volume: 5800, pe: 22.3, dy: 2.5, k: 65, d: 60, rsi: 62, macd: 8.7, foreignBuy: 2100, trustBuy: 600, dealerBuy: 200, ma5: 1875, ma20: 1840, ma60: 1790 },
-  { id: "2382", name: "廣達", sector: "AI伺服器", price: 385, prev: 378, volume: 28300, pe: 18.7, dy: 2.8, k: 82, d: 74, rsi: 75, macd: 5.1, foreignBuy: 6200, trustBuy: 4800, dealerBuy: 1100, ma5: 380, ma20: 365, ma60: 340 },
-  { id: "3231", name: "緯創", sector: "AI伺服器", price: 148, prev: 145, volume: 45600, pe: 15.2, dy: 3.1, k: 70, d: 63, rsi: 66, macd: 2.8, foreignBuy: 5500, trustBuy: 3200, dealerBuy: 600, ma5: 146, ma20: 140, ma60: 132 },
-  { id: "2308", name: "台達電", sector: "電源/散熱", price: 465, prev: 460, volume: 8900, pe: 30.1, dy: 1.5, k: 58, d: 55, rsi: 57, macd: 1.9, foreignBuy: 1800, trustBuy: 900, dealerBuy: -100, ma5: 462, ma20: 455, ma60: 440 },
-  { id: "2881", name: "富邦金", sector: "金融", price: 98.5, prev: 97.8, volume: 22100, pe: 11.2, dy: 4.8, k: 55, d: 52, rsi: 54, macd: 0.8, foreignBuy: 3200, trustBuy: 500, dealerBuy: 200, ma5: 97.5, ma20: 95, ma60: 92 },
-  { id: "2882", name: "國泰金", sector: "金融", price: 72.3, prev: 71.5, volume: 31500, pe: 10.8, dy: 5.1, k: 60, d: 56, rsi: 58, macd: 0.6, foreignBuy: 4100, trustBuy: 800, dealerBuy: 300, ma5: 71.8, ma20: 69.5, ma60: 67 },
-  { id: "2603", name: "長榮", sector: "航運", price: 225, prev: 228, volume: 18900, pe: 8.5, dy: 6.2, k: 35, d: 42, rsi: 38, macd: -3.2, foreignBuy: -5200, trustBuy: -1800, dealerBuy: -400, ma5: 230, ma20: 238, ma60: 245 },
-  { id: "3661", name: "世芯-KY", sector: "IC設計", price: 3850, prev: 3780, volume: 2100, pe: 35.2, dy: 0.8, k: 75, d: 68, rsi: 72, macd: 45.2, foreignBuy: 850, trustBuy: 320, dealerBuy: 150, ma5: 3800, ma20: 3700, ma60: 3550 },
-  { id: "2345", name: "智邦", sector: "網通", price: 680, prev: 672, volume: 6200, pe: 25.8, dy: 1.9, k: 68, d: 62, rsi: 65, macd: 6.3, foreignBuy: 1500, trustBuy: 2100, dealerBuy: 300, ma5: 675, ma20: 660, ma60: 635 },
-  { id: "6669", name: "緯穎", sector: "AI伺服器", price: 2180, prev: 2150, volume: 1800, pe: 20.5, dy: 2.2, k: 72, d: 66, rsi: 69, macd: 18.5, foreignBuy: 600, trustBuy: 450, dealerBuy: 80, ma5: 2160, ma20: 2100, ma60: 2020 },
-  { id: "2409", name: "友達", sector: "面板", price: 22.8, prev: 22.3, volume: 95000, pe: 15.5, dy: 3.5, k: 80, d: 72, rsi: 74, macd: 0.4, foreignBuy: 28000, trustBuy: 5000, dealerBuy: 1200, ma5: 22.5, ma20: 21.5, ma60: 20.8 },
-  { id: "3481", name: "群創", sector: "面板", price: 18.6, prev: 18.2, volume: 88000, pe: 14.2, dy: 3.8, k: 76, d: 70, rsi: 70, macd: 0.3, foreignBuy: 22000, trustBuy: 4200, dealerBuy: 900, ma5: 18.3, ma20: 17.5, ma60: 16.8 },
-  { id: "2002", name: "中鋼", sector: "鋼鐵", price: 26.5, prev: 26.8, volume: 35200, pe: 18.5, dy: 4.5, k: 30, d: 38, rsi: 35, macd: -0.5, foreignBuy: -8500, trustBuy: -2100, dealerBuy: -600, ma5: 27, ma20: 27.8, ma60: 28.5 },
-  { id: "2912", name: "統一超", sector: "零售", price: 310, prev: 308, volume: 3200, pe: 27.5, dy: 3.0, k: 52, d: 50, rsi: 51, macd: 0.5, foreignBuy: 400, trustBuy: 200, dealerBuy: 50, ma5: 309, ma20: 305, ma60: 300 },
-  { id: "2357", name: "華碩", sector: "品牌PC", price: 620, prev: 612, volume: 4500, pe: 14.8, dy: 4.0, k: 70, d: 64, rsi: 67, macd: 5.8, foreignBuy: 1800, trustBuy: 1500, dealerBuy: 400, ma5: 615, ma20: 600, ma60: 580 },
-  { id: "6770", name: "力積電", sector: "晶圓代工", price: 35.5, prev: 34.8, volume: 72000, pe: 45.2, dy: 0.5, k: 85, d: 78, rsi: 78, macd: 0.8, foreignBuy: 18000, trustBuy: 6500, dealerBuy: 2200, ma5: 35, ma20: 33.5, ma60: 31 },
+  { id: "2330", name: "?��???, sector: "?��?�?, price: 2445, prev: 2410, volume: 38420, pe: 28.5, dy: 1.8, k: 72, d: 65, rsi: 68, macd: 12.5, foreignBuy: 8500, trustBuy: 1200, dealerBuy: -300, ma5: 2420, ma20: 2380, ma60: 2310 },
+  { id: "2317", name: "鴻海", sector: "?��?�?��", price: 235, prev: 231, volume: 52100, pe: 12.1, dy: 4.2, k: 78, d: 70, rsi: 71, macd: 3.2, foreignBuy: 12000, trustBuy: 3500, dealerBuy: 800, ma5: 232, ma20: 225, ma60: 218 },
+  { id: "2454", name: "?�發�?, sector: "IC設�?", price: 1890, prev: 1870, volume: 5800, pe: 22.3, dy: 2.5, k: 65, d: 60, rsi: 62, macd: 8.7, foreignBuy: 2100, trustBuy: 600, dealerBuy: 200, ma5: 1875, ma20: 1840, ma60: 1790 },
+  { id: "2382", name: "�??", sector: "AI伺�???, price: 385, prev: 378, volume: 28300, pe: 18.7, dy: 2.8, k: 82, d: 74, rsi: 75, macd: 5.1, foreignBuy: 6200, trustBuy: 4800, dealerBuy: 1100, ma5: 380, ma20: 365, ma60: 340 },
+  { id: "3231", name: "緯創", sector: "AI伺�???, price: 148, prev: 145, volume: 45600, pe: 15.2, dy: 3.1, k: 70, d: 63, rsi: 66, macd: 2.8, foreignBuy: 5500, trustBuy: 3200, dealerBuy: 600, ma5: 146, ma20: 140, ma60: 132 },
+  { id: "2308", name: "?��???, sector: "?��?/??��", price: 465, prev: 460, volume: 8900, pe: 30.1, dy: 1.5, k: 58, d: 55, rsi: 57, macd: 1.9, foreignBuy: 1800, trustBuy: 900, dealerBuy: -100, ma5: 462, ma20: 455, ma60: 440 },
+  { id: "2881", name: "富邦??, sector: "?��?", price: 98.5, prev: 97.8, volume: 22100, pe: 11.2, dy: 4.8, k: 55, d: 52, rsi: 54, macd: 0.8, foreignBuy: 3200, trustBuy: 500, dealerBuy: 200, ma5: 97.5, ma20: 95, ma60: 92 },
+  { id: "2882", name: "?�泰??, sector: "?��?", price: 72.3, prev: 71.5, volume: 31500, pe: 10.8, dy: 5.1, k: 60, d: 56, rsi: 58, macd: 0.6, foreignBuy: 4100, trustBuy: 800, dealerBuy: 300, ma5: 71.8, ma20: 69.5, ma60: 67 },
+  { id: "2603", name: "?�榮", sector: "?��?", price: 225, prev: 228, volume: 18900, pe: 8.5, dy: 6.2, k: 35, d: 42, rsi: 38, macd: -3.2, foreignBuy: -5200, trustBuy: -1800, dealerBuy: -400, ma5: 230, ma20: 238, ma60: 245 },
+  { id: "3661", name: "世芯-KY", sector: "IC設�?", price: 3850, prev: 3780, volume: 2100, pe: 35.2, dy: 0.8, k: 75, d: 68, rsi: 72, macd: 45.2, foreignBuy: 850, trustBuy: 320, dealerBuy: 150, ma5: 3800, ma20: 3700, ma60: 3550 },
+  { id: "2345", name: "?�邦", sector: "網�?, price: 680, prev: 672, volume: 6200, pe: 25.8, dy: 1.9, k: 68, d: 62, rsi: 65, macd: 6.3, foreignBuy: 1500, trustBuy: 2100, dealerBuy: 300, ma5: 675, ma20: 660, ma60: 635 },
+  { id: "6669", name: "緯�?", sector: "AI伺�???, price: 2180, prev: 2150, volume: 1800, pe: 20.5, dy: 2.2, k: 72, d: 66, rsi: 69, macd: 18.5, foreignBuy: 600, trustBuy: 450, dealerBuy: 80, ma5: 2160, ma20: 2100, ma60: 2020 },
+  { id: "2409", name: "?��?", sector: "?�板", price: 22.8, prev: 22.3, volume: 95000, pe: 15.5, dy: 3.5, k: 80, d: 72, rsi: 74, macd: 0.4, foreignBuy: 28000, trustBuy: 5000, dealerBuy: 1200, ma5: 22.5, ma20: 21.5, ma60: 20.8 },
+  { id: "3481", name: "群創", sector: "?�板", price: 18.6, prev: 18.2, volume: 88000, pe: 14.2, dy: 3.8, k: 76, d: 70, rsi: 70, macd: 0.3, foreignBuy: 22000, trustBuy: 4200, dealerBuy: 900, ma5: 18.3, ma20: 17.5, ma60: 16.8 },
+  { id: "2002", name: "中鋼", sector: "?�鐵", price: 26.5, prev: 26.8, volume: 35200, pe: 18.5, dy: 4.5, k: 30, d: 38, rsi: 35, macd: -0.5, foreignBuy: -8500, trustBuy: -2100, dealerBuy: -600, ma5: 27, ma20: 27.8, ma60: 28.5 },
+  { id: "2912", name: "統�?�?, sector: "?�售", price: 310, prev: 308, volume: 3200, pe: 27.5, dy: 3.0, k: 52, d: 50, rsi: 51, macd: 0.5, foreignBuy: 400, trustBuy: 200, dealerBuy: 50, ma5: 309, ma20: 305, ma60: 300 },
+  { id: "2357", name: "?�碩", sector: "?��?PC", price: 620, prev: 612, volume: 4500, pe: 14.8, dy: 4.0, k: 70, d: 64, rsi: 67, macd: 5.8, foreignBuy: 1800, trustBuy: 1500, dealerBuy: 400, ma5: 615, ma20: 600, ma60: 580 },
+  { id: "6770", name: "?��???, sector: "?��?�?��", price: 35.5, prev: 34.8, volume: 72000, pe: 45.2, dy: 0.5, k: 85, d: 78, rsi: 78, macd: 0.8, foreignBuy: 18000, trustBuy: 6500, dealerBuy: 2200, ma5: 35, ma20: 33.5, ma60: 31 },
 ];
 
 function getSignal(s) {
   let score = 0, reasons = [];
-  if (s.k > 80 && s.k > s.d) { score -= 1; reasons.push("KD高檔過熱"); }
-  else if (s.k < 20 && s.k < s.d) { score += 2; reasons.push("KD低檔超賣"); }
-  else if (s.k > s.d && s.k < 80) { score += 1; reasons.push("KD黃金交叉"); }
-  else if (s.k < s.d && s.k > 20) { score -= 1; reasons.push("KD死亡交叉"); }
-  if (s.rsi > 70) { score -= 1; reasons.push("RSI過買"); }
-  else if (s.rsi < 30) { score += 2; reasons.push("RSI超賣反彈"); }
-  else if (s.rsi > 50) { score += 0.5; reasons.push("RSI偏多"); }
+  if (s.k > 80 && s.k > s.d) { score -= 1; reasons.push("KD高�??�熱"); }
+  else if (s.k < 20 && s.k < s.d) { score += 2; reasons.push("KD低�?超賣"); }
+  else if (s.k > s.d && s.k < 80) { score += 1; reasons.push("KD黃�?交�?"); }
+  else if (s.k < s.d && s.k > 20) { score -= 1; reasons.push("KD死亡交�?"); }
+  if (s.rsi > 70) { score -= 1; reasons.push("RSI?�買"); }
+  else if (s.rsi < 30) { score += 2; reasons.push("RSI超賣?��?"); }
+  else if (s.rsi > 50) { score += 0.5; reasons.push("RSI?��?"); }
   if (s.macd > 0) { score += 1; reasons.push("MACD紅柱"); }
   else { score -= 1; reasons.push("MACD綠柱"); }
-  if (s.price > s.ma5 && s.price > s.ma20) { score += 1; reasons.push("站穩均線之上"); }
-  else if (s.price < s.ma5 && s.price < s.ma20) { score -= 1; reasons.push("跌破均線支撐"); }
+  if (s.price > s.ma5 && s.price > s.ma20) { score += 1; reasons.push("站穩?��?之�?"); }
+  else if (s.price < s.ma5 && s.price < s.ma20) { score -= 1; reasons.push("跌破?��??��?"); }
   const ti = s.foreignBuy + s.trustBuy + s.dealerBuy;
-  if (ti > 5000) { score += 1; reasons.push("法人買超"); }
-  else if (ti < -5000) { score -= 1; reasons.push("法人賣超"); }
-  if (s.pe < 12) { score += 0.5; reasons.push("低本益比"); }
-  else if (s.pe > 30) { score -= 0.5; reasons.push("高本益比"); }
-  if (s.dy > 4) { score += 0.5; reasons.push("高殖利率"); }
+  if (ti > 5000) { score += 1; reasons.push("法人買�?"); }
+  else if (ti < -5000) { score -= 1; reasons.push("法人�??"); }
+  if (s.pe < 12) { score += 0.5; reasons.push("低本?��?"); }
+  else if (s.pe > 30) { score -= 0.5; reasons.push("高本?��?"); }
+  if (s.dy > 4) { score += 0.5; reasons.push("高�??��?"); }
   let signal, color;
-  if (score >= 3) { signal = "強力買進"; color = "#dc2626"; }
-  else if (score >= 1.5) { signal = "建議買進"; color = "#ef4444"; }
-  else if (score >= 0) { signal = "中性觀望"; color = "#a3a3a3"; }
-  else if (score >= -1.5) { signal = "建議賣出"; color = "#22c55e"; }
-  else { signal = "強力賣出"; color = "#16a34a"; }
+  if (score >= 3) { signal = "強�?買�?; color = "#dc2626"; }
+  else if (score >= 1.5) { signal = "建議買�?; color = "#ef4444"; }
+  else if (score >= 0) { signal = "中性�???; color = "#a3a3a3"; }
+  else if (score >= -1.5) { signal = "建議�?��"; color = "#22c55e"; }
+  else { signal = "強�?�?��"; color = "#16a34a"; }
   return { score, signal, color, reasons };
 }
 
@@ -82,20 +82,20 @@ function GaugeBar({ value, label, max = 100, zones }) {
 // --- Verdict Card ---
 function VerdictCard({ verdict, stockName, price, change }) {
   const map = {
-    "強力買進": { icon: "🔥", bg: "linear-gradient(135deg, #7f1d1d, #991b1b)", border: "#dc2626", color: "#fca5a5", sub: "技術面與籌碼面高度偏多，短線有強勢上攻動能" },
-    "買進": { icon: "📈", bg: "linear-gradient(135deg, #1a1a1a, #2a1515)", border: "#ef4444", color: "#ef4444", sub: "多項指標偏多，可考慮逢低分批佈局" },
-    "觀望": { icon: "⏸️", bg: "linear-gradient(135deg, #1a1a1a, #1a1a1a)", border: "#f59e0b", color: "#f59e0b", sub: "多空訊號交雜，建議等待方向明確再進場" },
-    "賣出": { icon: "📉", bg: "linear-gradient(135deg, #1a1a1a, #0d1f0d)", border: "#22c55e", color: "#22c55e", sub: "技術面轉弱或估值偏高，可考慮獲利了結或減碼" },
-    "強力賣出": { icon: "🚨", bg: "linear-gradient(135deg, #052e16, #14532d)", border: "#16a34a", color: "#86efac", sub: "多項指標高度偏空，建議盡速減碼避險" },
+    "強�?買�?: { icon: "?��", bg: "linear-gradient(135deg, #7f1d1d, #991b1b)", border: "#dc2626", color: "#fca5a5", sub: "?�術面?��?碼面高度?��?，短線�?強勢上攻?�能" },
+    "買�?: { icon: "??", bg: "linear-gradient(135deg, #1a1a1a, #2a1515)", border: "#ef4444", color: "#ef4444", sub: "多�??��??��?，可?�慮?��??�批佈�?" },
+    "觀??: { icon: "?��?", bg: "linear-gradient(135deg, #1a1a1a, #1a1a1a)", border: "#f59e0b", color: "#f59e0b", sub: "多空訊�?交�?，建議�?待方?��?確�??�場" },
+    "�?��": { icon: "??", bg: "linear-gradient(135deg, #1a1a1a, #0d1f0d)", border: "#22c55e", color: "#22c55e", sub: "?�術面轉弱?�估?��?高�??�考慮?�利了�??��?�? },
+    "強�?�?��": { icon: "?��", bg: "linear-gradient(135deg, #052e16, #14532d)", border: "#16a34a", color: "#86efac", sub: "多�??��?高度?�空，建議盡?��?碼避?? },
   };
-  const v = map[verdict] || map["觀望"];
+  const v = map[verdict] || map["觀??];
   return (
     <div style={{ background: v.bg, border: `2px solid ${v.border}`, borderRadius: 12, padding: "16px 16px 14px", marginBottom: 12 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 36 }}>{v.icon}</span>
           <div>
-            <div style={{ fontSize: 14, color: "#ddd" }}>AI 診斷結論</div>
+            <div style={{ fontSize: 14, color: "#ddd" }}>AI 診斷結�?</div>
             <div style={{ fontSize: 30, fontWeight: 800, color: v.color, letterSpacing: 2 }}>{verdict}</div>
           </div>
         </div>
@@ -130,33 +130,33 @@ function ScoreRing({ score, label, size = 48 }) {
 
 // --- Parse verdict ---
 function parseVerdict(text) {
-  if (/強力買進|強烈買進|積極買進/.test(text)) return "強力買進";
-  if (/強力賣出|強烈賣出|積極賣出/.test(text)) return "強力賣出";
-  const buy = (text.match(/買進|買入|做多|看多|偏多|建議買|可以買|逢低布局|逢低佈局|加碼|有利買方/g) || []).length;
-  const sell = (text.match(/賣出|做空|看空|偏空|建議賣|減碼|獲利了結|出場|應賣|宜賣/g) || []).length;
-  const hold = (text.match(/觀望|中性|持平|等待|暫時不宜|不建議進場|靜待/g) || []).length;
-  if (buy > sell && buy > hold) return buy >= 3 ? "強力買進" : "買進";
-  if (sell > buy && sell > hold) return sell >= 3 ? "強力賣出" : "賣出";
-  return "觀望";
+  if (/強�?買進|強�?買進|積極買�?.test(text)) return "強�?買�?;
+  if (/強�?�?��|強�?�?��|積極�?��/.test(text)) return "強�?�?��";
+  const buy = (text.match(/買進|買入|?��?|?��?|?��?|建議買|?�以買|?��?布�?|?��?佈�?|?�碼|?�利買方/g) || []).length;
+  const sell = (text.match(/�?��|?�空|?�空|?�空|建議賣|減碼|?�利了�?|?�場|?�賣|宜賣/g) || []).length;
+  const hold = (text.match(/觀?�|中性|?�平|等�?|?��?不�?|不建議進場|?��?/g) || []).length;
+  if (buy > sell && buy > hold) return buy >= 3 ? "強�?買�? : "買�?;
+  if (sell > buy && sell > hold) return sell >= 3 ? "強�?�?��" : "�?��";
+  return "觀??;
 }
 function parseStockInfo(text) {
   let stockName = null, price = null, change = null;
-  const nm = text.match(/(?:📊|股票|個股)[^\n]*?([^\s(（]+)\s*[（(](\d{4})[)）]/);
+  const nm = text.match(/(?:??|?�票|?�股)[^\n]*?([^\s(（]+)\s*[�?](\d{4})[)）]/);
   if (nm) stockName = `${nm[1]} (${nm[2]})`;
-  const pm = text.match(/(?:💰|股價|收盤|最新)[^\n]*?(\d+(?:\.\d+)?)\s*元/);
-  if (pm) price = pm[1] + " 元";
-  const cm = text.match(/[漲跌][^\n]*?([+-]?\d+(?:\.\d+)?%)/);
+  const pm = text.match(/(?:?��|?�價|?�盤|?�??[^\n]*?(\d+(?:\.\d+)?)\s*??);
+  if (pm) price = pm[1] + " ??;
+  const cm = text.match(/[漲�?][^\n]*?([+-]?\d+(?:\.\d+)?%)/);
   if (cm) change = cm[1];
   return { stockName, price, change };
 }
 function parseFinancialScores(text) {
   const scores = {};
   const items = [
-    { key: "revenue", label: "營收成長", patterns: [/營收[成長增長][^\n]*?(\d+)/] },
+    { key: "revenue", label: "?�收?�長", patterns: [/?�收[?�長增長][^\n]*?(\d+)/] },
     { key: "eps", label: "EPS", patterns: [/EPS[^\n]*?(\d+)/] },
-    { key: "margin", label: "毛利率", patterns: [/毛利率[^\n]*?(\d+)/] },
+    { key: "margin", label: "毛利??, patterns: [/毛利?�[^\n]*?(\d+)/] },
     { key: "roe", label: "ROE", patterns: [/ROE[^\n]*?(\d+)/] },
-    { key: "debt", label: "負債比", patterns: [/負債[比率][^\n]*?(\d+)/] },
+    { key: "debt", label: "負債�?, patterns: [/負債[比�?][^\n]*?(\d+)/] },
   ];
   items.forEach(item => {
     for (const p of item.patterns) {
@@ -213,15 +213,15 @@ async function callAI(prompt, apiKey, provider) {
     const data = await resp.json();
     return data.content?.filter(i => i.type === "text").map(i => i.text).join("\n") || "";
   } else {
-    // Gemini API - try with google_search, fallback without
+    // Gemini API - key must be in URL for browser CORS to work
     const makeRequest = async (useSearch) => {
       const body = { contents: [{ parts: [{ text: prompt }] }] };
       if (useSearch) body.tools = [{ google_search: {} }];
       const resp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         }
       );
@@ -235,11 +235,11 @@ async function callAI(prompt, apiKey, provider) {
     try {
       data = await makeRequest(true);
     } catch (e) {
-      // If google_search not available on free tier, retry without
-      if (e.message.includes("400") || e.message.includes("google_search") || e.message.includes("tool")) {
+      // If google_search not available, retry without
+      try {
         data = await makeRequest(false);
-      } else {
-        throw e;
+      } catch (e2) {
+        throw e2;
       }
     }
     return (data?.candidates?.[0]?.content?.parts || []).map(p => p.text || "").join("\n");
@@ -255,11 +255,11 @@ function SettingsPanel({ apiKey, onClose }) {
   const testKey = async () => {
     setTesting(true); setTestResult(null);
     try {
-      await callAI("回答兩個字：成功", input, apiKey.provider);
-      setTestResult({ ok: true, msg: "✅ 驗證成功！可以開始使用 AI 診斷了。" });
+      await callAI("?��??�個�?：�???, input, apiKey.provider);
+      setTestResult({ ok: true, msg: "??驗�??��?！可以�?始使??AI 診斷了�? });
       apiKey.save(input);
     } catch (e) {
-      setTestResult({ ok: false, msg: "❌ 驗證失敗：" + e.message });
+      setTestResult({ ok: false, msg: "??驗�?失�?�? + e.message });
     }
     setTesting(false);
   };
@@ -267,15 +267,15 @@ function SettingsPanel({ apiKey, onClose }) {
   return (
     <div style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 12, padding: 20, marginBottom: 14 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-        <div style={{ fontSize: 20, fontWeight: 700 }}>⚙️ API 設定</div>
-        <button onClick={onClose} style={{ background: "none", border: "none", color: "#ccc", fontSize: 22, cursor: "pointer" }}>✕</button>
+        <div style={{ fontSize: 20, fontWeight: 700 }}>?��? API 設�?</div>
+        <button onClick={onClose} style={{ background: "none", border: "none", color: "#ccc", fontSize: 22, cursor: "pointer" }}>??/button>
       </div>
 
-      <div style={{ fontSize: 15, color: "#ccc", marginBottom: 8 }}>選擇 AI 引擎</div>
+      <div style={{ fontSize: 15, color: "#ccc", marginBottom: 8 }}>?��? AI 引�?</div>
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         {[
-          { id: "gemini", name: "Google Gemini", tag: "🆓 免費", desc: "每天可用 500 次" },
-          { id: "anthropic", name: "Anthropic Claude", tag: "💰 付費", desc: "需儲值 $5 美金起" },
+          { id: "gemini", name: "Google Gemini", tag: "?? ?�費", desc: "每天?�用 500 �? },
+          { id: "anthropic", name: "Anthropic Claude", tag: "?�� 付費", desc: "?�?��?$5 美�?�? },
         ].map(p => (
           <button key={p.id} onClick={() => { apiKey.setProvider(p.id); setInput(""); setTestResult(null); }}
             style={{ flex: 1, padding: "14px 12px", borderRadius: 10, border: "2px solid " + (apiKey.provider === p.id ? "#f97316" : "#222"),
@@ -296,7 +296,7 @@ function SettingsPanel({ apiKey, onClose }) {
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
         <button onClick={testKey} disabled={testing || !input.trim()}
           style={{ flex: 1, padding: "12px 0", borderRadius: 8, border: "none", background: testing || !input.trim() ? "#333" : "linear-gradient(135deg, #ef4444, #f97316)", color: "#fff", fontSize: 16, fontWeight: 600, cursor: testing ? "wait" : "pointer" }}>
-          {testing ? "驗證中…" : "儲存並驗證"}
+          {testing ? "驗�?中�? : "?��?並�?�?}
         </button>
         {apiKey.hasKey && (
           <button onClick={() => { apiKey.clear(); setInput(""); setTestResult(null); }}
@@ -312,16 +312,16 @@ function SettingsPanel({ apiKey, onClose }) {
 
       <div style={{ marginTop: 14, padding: 14, background: "#0a0a0a", borderRadius: 8, fontSize: 14, color: "#bbb", lineHeight: 2 }}>
         {apiKey.provider === "gemini" ? (<>
-          <div style={{ fontWeight: 600, marginBottom: 4, color: "#22c55e", fontSize: 15 }}>🆓 免費取得 Gemini API Key</div>
-          1. 到 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style={{ color: "#f97316" }}>aistudio.google.com/apikey</a> 用 Google 帳號登入<br/>
-          2. 點「建立 API 金鑰」→ 選一個專案<br/>
-          3. 複製金鑰（AIzaSy... 開頭）貼到上方<br/>
-          <strong style={{ color: "#22c55e" }}>✨ 完全免費，不需信用卡！</strong>
+          <div style={{ fontWeight: 600, marginBottom: 4, color: "#22c55e", fontSize: 15 }}>?? ?�費?��? Gemini API Key</div>
+          1. ??<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style={{ color: "#f97316" }}>aistudio.google.com/apikey</a> ??Google 帳�??�入<br/>
+          2. 點「建�?API ?�鑰?��? ?��??��?�?br/>
+          3. 複製?�鑰（AIzaSy... ?�頭）貼?��???br/>
+          <strong style={{ color: "#22c55e" }}>??完全?�費，�??�信用?��?</strong>
         </>) : (<>
-          <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 15 }}>取得 Anthropic API Key</div>
-          1. 到 <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style={{ color: "#f97316" }}>console.anthropic.com</a> 登入<br/>
-          2. 建立 Key → Plans & Billing 加值 $5 起<br/>
-          3. 複製金鑰貼到上方
+          <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 15 }}>?��? Anthropic API Key</div>
+          1. ??<a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style={{ color: "#f97316" }}>console.anthropic.com</a> ?�入<br/>
+          2. 建�? Key ??Plans & Billing ?��?$5 �?br/>
+          3. 複製?�鑰貼到上方
         </>)}
       </div>
     </div>
@@ -330,7 +330,7 @@ function SettingsPanel({ apiKey, onClose }) {
 
 
 // ====================================
-// TAB 1: AI 個股診斷 + 財報健檢
+// TAB 1: AI ?�股診斷 + 財報?�檢
 // ====================================
 function TabDiagnosis({ watchlist, apiKey }) {
   const [query, setQuery] = useState("");
@@ -348,75 +348,75 @@ function TabDiagnosis({ watchlist, apiKey }) {
   const search = async (q) => {
     const searchQ = q || query;
     if (!searchQ.trim()) return;
-    if (!apiKey.hasKey) { setError("請先到右上角 ⚙️ 設定 API Key 才能使用 AI 診斷"); return; }
+    if (!apiKey.hasKey) { setError("請�??�右上�? ?��? 設�? API Key ?�能使用 AI 診斷"); return; }
     setLoading(true); setResult(null); setError("");
     try {
       // Step 1: Technical + Verdict
-      setStep("搜尋股價與技術指標…");
-      const techText = await callAI(`你是台股首席分析師。用戶查詢：「${searchQ}」
+      setStep("?��??�價?��?術�?標�?);
+      const techText = await callAI(`你是?�股首席?��?師。用?�查詢�???{searchQ}??
 
-請搜尋這檔股票最新資料，嚴格按以下格式回答（繁體中文）：
+請�?尋這�??�票?�?��??��??�格?�以下格式�?答�?繁�?中�?）�?
 
-📊 股票：[名稱] ([代號])
-💰 股價：[最新收盤價] 元（[漲跌金額] / [漲跌幅%]）
-📈 技術面：KD=[K值]/[D值]（[狀態]）、RSI=[數值]、MACD=[紅柱/綠柱]
-📊 均線：vs 5日/20日/60日均線（站上或跌破）
-🏦 法人：外資[買超/賣超]、投信[買超/賣超]（近5日累計）
+?? ?�票：[?�稱] ([�??])
+?�� ?�價：[?�?�收?�價] ?��?[漲�??��?] / [漲�?�?]�?
+?? ?�術面：KD=[K?�]/[D?�]（[?�?�]）、RSI=[?�值]?�MACD=[紅柱/綠柱]
+?? ?��?：vs 5??20??60?��?線�?站�??��??��?
+?�� 法人：�?資[買�?/�??]?��?信[買�?/�??]（�?5?�累計�?
 
-===== 診斷結論 =====
-🎯 判定：【買進】或【賣出】或【觀望】（三選一，必須明確）
-💪 信心度：[高/中/低]
-📝 一句話理由：[為什麼應該買或賣]
-🎯 建議策略：[具體操作，例如「分批買進，停損設在XX元」]
-⚠️ 最大風險：[主要風險]`, apiKey.key, apiKey.provider);
+===== 診斷結�? =====
+?�� ?��?：【買?�】�??�賣?�】�??��??�】�?三選一，�??��?確�?
+?�� 信�?度�?[�?�?低]
+?? 一?�話?�由：[?��?麼�?該買?�賣]
+?�� 建議策略：[?��??��?，�?如「�??�買?��??��?設在XX?�」]
+?��? ?�大風?��?[主�?風險]`, apiKey.key, apiKey.provider);
 
       // Step 2: Financial report
-      setStep("分析財報數據…");
-      const finText = await callAI(`你是台股財報分析師。請搜尋「${searchQ}」這檔股票的最新財報數據。
+      setStep("?��?財報?��???);
+      const finText = await callAI(`你是?�股財報?��?師。�??��???{searchQ}?�這�??�票?��??�財?�數?��?
 
-請嚴格按照以下格式回答，每項給出 0-100 的評分：
+請嚴?��??�以下格式�?答�?每�?給出 0-100 ?��??��?
 
-📊 財報健檢結果：
+?? 財報?�檢結�?�?
 
-1️⃣ 營收成長力 [評分]/100
-   - 近四季營收年增率：[數據]
-   - 趨勢：[連續成長/衰退/持平]
+1️⃣ ?�收?�長??[評�?]/100
+   - 近�?�???�年增�?：[?��?]
+   - 趨勢：[????�長/衰退/?�平]
 
-2️⃣ 獲利能力 EPS [評分]/100
-   - 近四季 EPS：[數據]
-   - 年增率：[數據]
+2️⃣ ?�利?��? EPS [評�?]/100
+   - 近�?�?EPS：[?��?]
+   - 年�??��?[?��?]
 
-3️⃣ 毛利率表現 [評分]/100
-   - 最新毛利率：[數據]%
-   - vs 同業平均：[高於/低於]
+3️⃣ 毛利?�表??[評�?]/100
+   - ?�?��??��?：[?��?]%
+   - vs ?�業平�?：[高於/低於]
 
-4️⃣ 股東權益 ROE [評分]/100
-   - 最新 ROE：[數據]%
-   - 趨勢：[改善/惡化/穩定]
+4️⃣ ?�東權�? ROE [評�?]/100
+   - ?�??ROE：[?��?]%
+   - 趨勢：[?��?/?��?/穩�?]
 
-5️⃣ 財務體質（負債比）[評分]/100
-   - 負債比率：[數據]%
-   - 流動比率：[數據]%
+5️⃣ 財�?體質（�??��?）[評�?]/100
+   - 負債比�?：[?��?]%
+   - 流�?比�?：[?��?]%
 
-📋 財報總評：[用2句話總結這家公司的財務狀況，是否值得投資]`, apiKey.key, apiKey.provider);
+?? 財報總�?：[???�話總�??�家?�司?�財?��?況�??�否?��??��?]`, apiKey.key, apiKey.provider);
 
       // Step 3: News
-      setStep("搜尋最新相關新聞…");
-      const newsText = await callAI(`搜尋「${searchQ}」台股 最近一週的重要新聞，找出 3-5 則最關鍵的新聞。
+      setStep("?��??�?�相?�新?��?);
+      const newsText = await callAI(`?��???{searchQ}?�台???�近�??��??��??��?，找??3-5 ?��??�鍵?�新?��?
 
-請嚴格按以下格式回答（繁體中文）：
+請嚴?��?以�??��??��?（�?體中?��?�?
 
-📰 最新消息（近一週）
+?�� ?�?��??��?近�??��?
 
-🔴/🟢 [利多/利空] [新聞標題摘要]
-   → 影響：[對股價的可能影響，1句話]
+?��/?�� [?��?/?�空] [?��?標�??��?]
+   ??影響：[對股?��??�能影響�??�話]
 
-🔴/🟢 [利多/利空] [新聞標題摘要]
-   → 影響：[對股價的可能影響，1句話]
+?��/?�� [?��?/?�空] [?��?標�??��?]
+   ??影響：[對股?��??�能影響�??�話]
 
-（列出 3-5 則）
+（�???3-5 ?��?
 
-📊 新聞面總評：整體偏[利多/利空/中性]，[1句話說明]`, apiKey.key, apiKey.provider);
+?? ?��??�總評�??��??�[?��?/?�空/中性]，[1?�話說�?]`, apiKey.key, apiKey.provider);
 
       const verdict = parseVerdict(techText);
       const info = parseStockInfo(techText);
@@ -424,14 +424,14 @@ function TabDiagnosis({ watchlist, apiKey }) {
       setResult({ query: searchQ, techText, finText, newsText, verdict, ...info, finScores, time: new Date() });
       setHistory(h => [{ query: searchQ, verdict, time: new Date().toISOString() }, ...h.slice(0, 14)]);
     } catch (e) {
-      const msg = e.message === "NO_KEY" ? "請先設定 API Key" : e.message || "連線失敗，請稍後再試";
-      setResult({ query: searchQ, techText: msg, finText: "", newsText: "", verdict: "觀望", time: new Date() });
+      const msg = e.message === "NO_KEY" ? "請�?設�? API Key" : e.message || "???失�?，�?稍�??�試";
+      setResult({ query: searchQ, techText: msg, finText: "", newsText: "", verdict: "觀??, time: new Date() });
     }
     setLoading(false); setStep("");
   };
 
-  const verdictColors = { "強力買進": "#dc2626", "買進": "#ef4444", "觀望": "#f59e0b", "賣出": "#22c55e", "強力賣出": "#16a34a" };
-  const quickStocks = ["台積電", "鴻海", "聯發科", "廣達", "緯創", "富邦金", "長榮", "華碩"];
+  const verdictColors = { "強�?買�?: "#dc2626", "買�?: "#ef4444", "觀??: "#f59e0b", "�?��": "#22c55e", "強�?�?��": "#16a34a" };
+  const quickStocks = ["?��???, "鴻海", "?�發�?, "�??", "緯創", "富邦??, "?�榮", "?�碩"];
   const [openSection, setOpenSection] = useState({ tech: true, fin: true, news: true });
 
   return (
@@ -439,26 +439,26 @@ function TabDiagnosis({ watchlist, apiKey }) {
       {/* Search bar */}
       <div style={{ padding: "16px 16px 12px", background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: "linear-gradient(135deg, #ef4444, #f97316)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>🔍</div>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: "linear-gradient(135deg, #ef4444, #f97316)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>??</div>
           <div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: "#e5e5e5" }}>個股 AI 全面診斷</div>
-            <div style={{ fontSize: 14, color: "#ccc" }}>技術面 + 財報健檢 + 即時新聞，三合一分析</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: "#e5e5e5" }}>?�股 AI ?�面診斷</div>
+            <div style={{ fontSize: 14, color: "#ccc" }}>?�術面 + 財報?�檢 + ?��??��?，�??��??��?</div>
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === "Enter" && search()}
-            placeholder="輸入股票代號或名稱，例：2330、台積電"
+            placeholder="輸入?�票�???��?稱�?例�?2330?�台積電"
             style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "10px 14px", color: "#e5e5e5", fontSize: 18, outline: "none" }} />
           <button onClick={() => search()} disabled={loading}
             style={{ background: loading ? "#333" : "linear-gradient(135deg, #ef4444, #f97316)", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 17, fontWeight: 600, cursor: loading ? "wait" : "pointer", whiteSpace: "nowrap" }}>
-            {loading ? "分析中…" : "全面診斷"}
+            {loading ? "?��?中�? : "?�面診斷"}
           </button>
         </div>
       </div>
 
       {/* Quick picks */}
       <div style={{ padding: "8px 16px", borderBottom: "1px solid #1a1a1a", display: "flex", gap: 5, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 14, color: "#aaa", lineHeight: "24px" }}>快查：</span>
+        <span style={{ fontSize: 14, color: "#aaa", lineHeight: "24px" }}>快查�?/span>
         {quickStocks.map(s => (
           <button key={s} onClick={() => { setQuery(s); search(s); }}
             style={{ padding: "2px 8px", borderRadius: 8, fontSize: 14, border: "1px solid #222", background: "#141414", color: "#ddd", cursor: "pointer" }}>{s}</button>
@@ -468,11 +468,11 @@ function TabDiagnosis({ watchlist, apiKey }) {
       {/* No API Key warning */}
       {!apiKey.hasKey && !loading && !result && (
         <div style={{ margin: "12px 16px", padding: 16, background: "#1a1510", border: "1px solid #f59e0b44", borderRadius: 10, textAlign: "center" }}>
-          <div style={{ fontSize: 28, marginBottom: 8 }}>🔑</div>
-          <div style={{ fontSize: 16, fontWeight: 600, color: "#f59e0b", marginBottom: 6 }}>需要設定 API Key</div>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>??</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: "#f59e0b", marginBottom: 6 }}>?�要設�?API Key</div>
           <div style={{ fontSize: 14, color: "#ccc", lineHeight: 1.7 }}>
-            AI 診斷功能需要 Anthropic API Key。<br/>
-            請點右上角 ⚙️ 進行設定。
+            AI 診斷?�能?��?Anthropic API Key??br/>
+            請�??��?�??��? ?��?設�???
           </div>
         </div>
       )}
@@ -480,7 +480,7 @@ function TabDiagnosis({ watchlist, apiKey }) {
       {/* Error */}
       {error && (
         <div style={{ margin: "8px 16px", padding: 12, background: "#2a1515", border: "1px solid #dc2626", borderRadius: 8, fontSize: 14, color: "#fca5a5" }}>
-          ❌ {error}
+          ??{error}
         </div>
       )}
 
@@ -490,10 +490,10 @@ function TabDiagnosis({ watchlist, apiKey }) {
           <div style={{ display: "inline-block", width: 36, height: 36, border: "3px solid #222", borderTopColor: "#ef4444", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
           <div style={{ marginTop: 12, fontSize: 17, color: "#ddd" }}>{step}</div>
           <div style={{ marginTop: 6, display: "flex", justifyContent: "center", gap: 4 }}>
-            {["技術面", "財報", "新聞"].map((s, i) => (
+            {["?�術面", "財報", "?��?"].map((s, i) => (
               <div key={s} style={{ padding: "2px 8px", borderRadius: 8, fontSize: 14,
-                background: step.includes("技術") && i === 0 ? "#f97316" + "30" : step.includes("財報") && i === 1 ? "#f97316" + "30" : step.includes("新聞") && i === 2 ? "#f97316" + "30" : "#1a1a1a",
-                color: step.includes("技術") && i === 0 ? "#f97316" : step.includes("財報") && i === 1 ? "#f97316" : step.includes("新聞") && i === 2 ? "#f97316" : "#444" }}>{s}</div>
+                background: step.includes("?��?) && i === 0 ? "#f97316" + "30" : step.includes("財報") && i === 1 ? "#f97316" + "30" : step.includes("?��?") && i === 2 ? "#f97316" + "30" : "#1a1a1a",
+                color: step.includes("?��?) && i === 0 ? "#f97316" : step.includes("財報") && i === 1 ? "#f97316" : step.includes("?��?") && i === 2 ? "#f97316" : "#444" }}>{s}</div>
             ))}
           </div>
           <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
@@ -510,13 +510,13 @@ function TabDiagnosis({ watchlist, apiKey }) {
           <button onClick={() => watchlist.add({ id: result.query, name: result.stockName || result.query, verdict: result.verdict, time: new Date().toISOString(), techText: result.techText, finText: result.finText })}
             disabled={watchlist.has(result.query)}
             style={{ width: "100%", padding: "8px 0", borderRadius: 8, border: "1px solid #333", background: watchlist.has(result.query) ? "#1a1a1a" : "#141414", color: watchlist.has(result.query) ? "#555" : "#f59e0b", fontSize: 16, fontWeight: 600, cursor: "pointer", marginBottom: 12 }}>
-            {watchlist.has(result.query) ? "✓ 已加入自選股" : "⭐ 加入自選股追蹤"}
+            {watchlist.has(result.query) ? "??已�??�自?�股" : "�??�入?�選?�追�?}
           </button>
 
           {/* Financial Score Rings */}
           {result.finScores && Object.keys(result.finScores).length > 0 && (
             <div style={{ display: "flex", justifyContent: "space-around", padding: "12px 0", marginBottom: 12, background: "#0d0d0d", borderRadius: 10, border: "1px solid #1a1a1a" }}>
-              {[["revenue","營收"], ["eps","EPS"], ["margin","毛利"], ["roe","ROE"], ["debt","體質"]].map(([k, l]) => (
+              {[["revenue","?�收"], ["eps","EPS"], ["margin","毛利"], ["roe","ROE"], ["debt","體質"]].map(([k, l]) => (
                 <ScoreRing key={k} score={result.finScores[k] || 50} label={l} />
               ))}
             </div>
@@ -524,15 +524,15 @@ function TabDiagnosis({ watchlist, apiKey }) {
 
           {/* Collapsible sections */}
           {[
-            { key: "tech", icon: "📈", title: "技術面 + 買賣判定", content: result.techText },
-            { key: "fin", icon: "📊", title: "財報健檢", content: result.finText },
-            { key: "news", icon: "📰", title: "即時新聞 AI 解讀", content: result.newsText },
+            { key: "tech", icon: "??", title: "?�術面 + 買賣?��?", content: result.techText },
+            { key: "fin", icon: "??", title: "財報?�檢", content: result.finText },
+            { key: "news", icon: "?��", title: "?��??��? AI �??", content: result.newsText },
           ].filter(s => s.content).map(section => (
             <div key={section.key} style={{ marginBottom: 8 }}>
               <button onClick={() => setOpenSection(prev => ({ ...prev, [section.key]: !prev[section.key] }))}
                 style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", background: "#0d0d0d", border: "1px solid #1a1a1a", borderRadius: openSection[section.key] ? "8px 8px 0 0" : 8, color: "#ccc", fontSize: 16, fontWeight: 600, cursor: "pointer" }}>
                 <span>{section.icon} {section.title}</span>
-                <span style={{ fontSize: 14, color: "#bbb" }}>{openSection[section.key] ? "▼" : "▶"}</span>
+                <span style={{ fontSize: 14, color: "#bbb" }}>{openSection[section.key] ? "?? : "??}</span>
               </button>
               {openSection[section.key] && (
                 <div style={{ background: "#0a0a0a", borderRadius: "0 0 8px 8px", padding: 12, fontSize: 16, lineHeight: 1.9, color: "#bbb", whiteSpace: "pre-wrap", wordBreak: "break-word", borderLeft: "3px solid #f97316", maxHeight: 350, overflowY: "auto" }}>
@@ -544,11 +544,11 @@ function TabDiagnosis({ watchlist, apiKey }) {
 
           {/* Actions */}
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button onClick={() => search(result.query)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid #222", background: "#141414", color: "#ddd", fontSize: 15, cursor: "pointer" }}>🔄 重新分析</button>
-            <button onClick={() => setResult(null)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid #222", background: "#141414", color: "#ddd", fontSize: 15, cursor: "pointer" }}>🔍 查詢其他</button>
+            <button onClick={() => search(result.query)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid #222", background: "#141414", color: "#ddd", fontSize: 15, cursor: "pointer" }}>?? ?�新?��?</button>
+            <button onClick={() => setResult(null)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid #222", background: "#141414", color: "#ddd", fontSize: 15, cursor: "pointer" }}>?? ?�詢?��?</button>
           </div>
           <div style={{ marginTop: 6, padding: "5px 10px", background: "#0a0a0a", borderRadius: 6, fontSize: 13, color: "#999", textAlign: "center" }}>
-            ⚠️ AI 分析僅供學習參考，不構成投資建議。投資有風險，請自行判斷。
+            ?��? AI ?��??��?學�??�考�?不�??��?資建議。�?資�?風險，�??��??�斷??
           </div>
         </div>
       )}
@@ -557,7 +557,7 @@ function TabDiagnosis({ watchlist, apiKey }) {
       {history.length > 0 && !loading && !result && (
         <div style={{ padding: "10px 16px 14px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-            <span style={{ fontSize: 14, color: "#aaa" }}>查詢紀錄</span>
+            <span style={{ fontSize: 14, color: "#aaa" }}>?�詢紀??/span>
             <button onClick={() => { setHistory([]); localStorage.removeItem("tw-stock-history"); }}
               style={{ fontSize: 13, color: "#999", background: "none", border: "none", cursor: "pointer" }}>清除</button>
           </div>
@@ -577,7 +577,7 @@ function TabDiagnosis({ watchlist, apiKey }) {
 }
 
 // ====================================
-// TAB 2: 自選股追蹤
+// TAB 2: ?�選?�追�?
 // ====================================
 function TabWatchlist({ watchlist, apiKey }) {
   const [refreshing, setRefreshing] = useState(null);
@@ -585,12 +585,12 @@ function TabWatchlist({ watchlist, apiKey }) {
   const refresh = async (item) => {
     setRefreshing(item.id);
     try {
-      const text = await callAI(`你是台股分析師。請搜尋「${item.name || item.id}」的最新股價與今日漲跌幅，以及目前該買進還是賣出。
+      const text = await callAI(`你是?�股?��?師。�??��???{item.name || item.id}?��??�?�股?��?今日漲�?幅�?以�??��?該買?��??�賣?��?
 
-用以下格式簡短回答（繁體中文）：
-💰 [股價] 元（[漲跌幅%]）
-🎯 判定：【買進/賣出/觀望】
-📝 [一句話理由]`, apiKey.key, apiKey.provider);
+?�以下格式簡?��?答�?繁�?中�?）�?
+?�� [?�價] ?��?[漲�?�?]�?
+?�� ?��?：【買??�?��/觀?��?
+?? [一?�話?�由]`, apiKey.key, apiKey.provider);
       const verdict = parseVerdict(text);
       watchlist.update(item.id, { latestInfo: text, verdict, lastRefresh: new Date().toISOString() });
     } catch {}
@@ -603,24 +603,24 @@ function TabWatchlist({ watchlist, apiKey }) {
     }
   };
 
-  const verdictColors = { "強力買進": "#dc2626", "買進": "#ef4444", "觀望": "#f59e0b", "賣出": "#22c55e", "強力賣出": "#16a34a" };
+  const verdictColors = { "強�?買�?: "#dc2626", "買�?: "#ef4444", "觀??: "#f59e0b", "�?��": "#22c55e", "強�?�?��": "#16a34a" };
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <div style={{ fontSize: 18, fontWeight: 700 }}>⭐ 自選股追蹤 ({watchlist.list.length})</div>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>�??�選?�追�?({watchlist.list.length})</div>
         {watchlist.list.length > 0 && (
           <button onClick={refreshAll} style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #333", background: "#141414", color: "#f59e0b", fontSize: 15, cursor: "pointer" }}>
-            🔄 全部更新
+            ?? ?�部?�新
           </button>
         )}
       </div>
 
       {watchlist.list.length === 0 ? (
         <div style={{ padding: 40, textAlign: "center", background: "#111", borderRadius: 12, border: "1px solid #1e1e1e" }}>
-          <div style={{ fontSize: 32, marginBottom: 10 }}>⭐</div>
-          <div style={{ fontSize: 17, color: "#ccc", marginBottom: 4 }}>還沒有自選股</div>
-          <div style={{ fontSize: 15, color: "#aaa" }}>到「個股診斷」查詢後，點「加入自選股」即可追蹤</div>
+          <div style={{ fontSize: 32, marginBottom: 10 }}>�?/div>
+          <div style={{ fontSize: 17, color: "#ccc", marginBottom: 4 }}>?��??�自?�股</div>
+          <div style={{ fontSize: 15, color: "#aaa" }}>?�「個股診斷?�查詢�?，�??��??�自?�股?�即?�追�?/div>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -638,10 +638,10 @@ function TabWatchlist({ watchlist, apiKey }) {
                 <div style={{ display: "flex", gap: 4 }}>
                   <button onClick={() => refresh(item)} disabled={refreshing === item.id}
                     style={{ padding: "3px 8px", borderRadius: 4, border: "1px solid #222", background: "#0d0d0d", color: "#ddd", fontSize: 14, cursor: "pointer" }}>
-                    {refreshing === item.id ? "⏳" : "🔄"}
+                    {refreshing === item.id ? "?? : "??"}
                   </button>
                   <button onClick={() => watchlist.remove(item.id)}
-                    style={{ padding: "3px 8px", borderRadius: 4, border: "1px solid #222", background: "#0d0d0d", color: "#bbb", fontSize: 14, cursor: "pointer" }}>✕</button>
+                    style={{ padding: "3px 8px", borderRadius: 4, border: "1px solid #222", background: "#0d0d0d", color: "#bbb", fontSize: 14, cursor: "pointer" }}>??/button>
                 </div>
               </div>
               {item.latestInfo && (
@@ -651,7 +651,7 @@ function TabWatchlist({ watchlist, apiKey }) {
               )}
               {item.lastRefresh && (
                 <div style={{ fontSize: 13, color: "#999", marginTop: 4 }}>
-                  上次更新：{new Date(item.lastRefresh).toLocaleString("zh-TW")}
+                  上次?�新：{new Date(item.lastRefresh).toLocaleString("zh-TW")}
                 </div>
               )}
             </div>
@@ -663,16 +663,16 @@ function TabWatchlist({ watchlist, apiKey }) {
 }
 
 // ====================================
-// TAB 3/4: 買進 / 賣出清單
+// TAB 3/4: 買�?/ �?��清單
 // ====================================
 function TabList({ mode, watchlist }) {
-  const [sector, setSector] = useState("全部");
+  const [sector, setSector] = useState("?�部");
   const [sortKey, setSortKey] = useState("score");
   const [sortDir, setSortDir] = useState("desc");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(null);
 
-  const sectors = ["全部", ...Array.from(new Set(STOCKS.map(s => s.sector)))];
+  const sectors = ["?�部", ...Array.from(new Set(STOCKS.map(s => s.sector)))];
   const enriched = STOCKS.map(s => {
     const sig = getSignal(s);
     const change = s.price - s.prev;
@@ -680,7 +680,7 @@ function TabList({ mode, watchlist }) {
     return { ...s, ...sig, change: change.toFixed(2), pct, isUp: change > 0 };
   });
   const filtered = enriched.filter(s => {
-    if (sector !== "全部" && s.sector !== sector) return false;
+    if (sector !== "?�部" && s.sector !== sector) return false;
     if (search && !s.name.includes(search) && !s.id.includes(search)) return false;
     if (mode === "buy" && s.score < 0) return false;
     if (mode === "sell" && s.score >= 0) return false;
@@ -696,7 +696,7 @@ function TabList({ mode, watchlist }) {
   return (
     <>
       <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜尋代號/名稱"
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="?��?�??/?�稱"
           style={{ flex: 1, background: "#111", border: "1px solid #1e1e1e", borderRadius: 6, padding: "6px 10px", color: "#e5e5e5", fontSize: 16, outline: "none" }} />
       </div>
       <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
@@ -706,15 +706,15 @@ function TabList({ mode, watchlist }) {
         ))}
       </div>
       <div style={{ display: "flex", gap: 4, marginBottom: 10, flexWrap: "wrap" }}>
-        {[["score","訊號"], ["change","漲跌"], ["volume","量"], ["pe","PE"], ["dy","殖利率"]].map(([k, l]) => (
+        {[["score","訊�?"], ["change","漲�?"], ["volume","??], ["pe","PE"], ["dy","殖利??]].map(([k, l]) => (
           <button key={k} onClick={() => toggleSort(k)}
             style={{ padding: "2px 8px", fontSize: 14, borderRadius: 4, border: sortKey === k ? "1px solid #333" : "1px solid transparent", background: sortKey === k ? "#1a1a1a" : "transparent", color: sortKey === k ? "#ccc" : "#444", cursor: "pointer" }}>
-            {l}{sortKey === k ? (sortDir === "desc" ? "↓" : "↑") : ""}
+            {l}{sortKey === k ? (sortDir === "desc" ? "?? : "??) : ""}
           </button>
         ))}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-        {filtered.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#aaa", fontSize: 16 }}>無符合條件的股票</div>}
+        {filtered.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#aaa", fontSize: 16 }}>?�符?��?件�??�票</div>}
         {filtered.map(stock => {
           const open = selected === stock.id;
           const ti = stock.foreignBuy + stock.trustBuy + stock.dealerBuy;
@@ -742,7 +742,7 @@ function TabList({ mode, watchlist }) {
                     <GaugeBar label="RSI" value={stock.rsi} zones={[{ from: 0, to: 30, color: "#22c55e" }, { from: 30, to: 70, color: "#a3a3a3" }, { from: 70, to: 100, color: "#ef4444" }]} />
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 4, marginBottom: 10 }}>
-                    {[["外資", stock.foreignBuy], ["投信", stock.trustBuy], ["自營", stock.dealerBuy], ["合計", ti]].map(([l, v]) => (
+                    {[["外�?", stock.foreignBuy], ["?�信", stock.trustBuy], ["?��?", stock.dealerBuy], ["?��?", ti]].map(([l, v]) => (
                       <div key={l} style={{ background: "#0a0a0a", borderRadius: 6, padding: "5px 6px", textAlign: "center" }}>
                         <div style={{ fontSize: 13, color: "#bbb" }}>{l}</div>
                         <div style={{ fontSize: 15, fontWeight: 600, color: v > 0 ? "#ef4444" : v < 0 ? "#22c55e" : "#666" }}>{v > 0 ? "+" : ""}{(v / 1000).toFixed(1)}k</div>
@@ -756,9 +756,9 @@ function TabList({ mode, watchlist }) {
                     <button onClick={() => watchlist.add({ id: stock.id, name: stock.name, verdict: stock.signal })}
                       disabled={watchlist.has(stock.id)}
                       style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #333", background: "#141414", color: watchlist.has(stock.id) ? "#555" : "#f59e0b", fontSize: 14, cursor: "pointer" }}>
-                      {watchlist.has(stock.id) ? "✓ 已追蹤" : "⭐ 加入自選"}
+                      {watchlist.has(stock.id) ? "??已追�? : "�??�入?�選"}
                     </button>
-                    <span style={{ fontSize: 14, color: "#999", lineHeight: "24px" }}>量 {stock.volume.toLocaleString()} 張 · {stock.sector}</span>
+                    <span style={{ fontSize: 14, color: "#999", lineHeight: "24px" }}>??{stock.volume.toLocaleString()} �?· {stock.sector}</span>
                   </div>
                 </div>
               )}
@@ -791,16 +791,16 @@ export default function App() {
       <div style={{ borderBottom: "1px solid #1a1a1a", padding: "16px 16px 12px" }}>
         <div style={{ maxWidth: 640, margin: "0 auto" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 2 }}>
-            <span style={{ fontSize: 28, fontWeight: 800, letterSpacing: -1, background: "linear-gradient(90deg, #ef4444, #f97316)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>台股雷達</span>
-            <span style={{ fontSize: 14, color: "#aaa" }}>v3.0</span>
+            <span style={{ fontSize: 28, fontWeight: 800, letterSpacing: -1, background: "linear-gradient(90deg, #ef4444, #f97316)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>?�股?��?</span>
+            <span style={{ fontSize: 14, color: "#aaa" }}>v4.1</span>
             <div style={{ marginLeft: "auto" }}>
               <button onClick={() => setShowSettings(!showSettings)}
                 style={{ background: apiKey.hasKey ? "#1a1a1a" : "#2a1510", border: `1px solid ${apiKey.hasKey ? "#333" : "#f59e0b"}`, borderRadius: 8, padding: "6px 12px", color: apiKey.hasKey ? "#ccc" : "#f59e0b", fontSize: 14, cursor: "pointer" }}>
-                ⚙️ {apiKey.hasKey ? "已設定" : "設定 API Key"}
+                ?��? {apiKey.hasKey ? "已設�? : "設�? API Key"}
               </button>
             </div>
           </div>
-          <div style={{ fontSize: 14, color: "#aaa" }}>{now.toLocaleDateString("zh-TW", { year: "numeric", month: "long", day: "numeric", weekday: "long" })} · AI 全面診斷</div>
+          <div style={{ fontSize: 14, color: "#aaa" }}>{now.toLocaleDateString("zh-TW", { year: "numeric", month: "long", day: "numeric", weekday: "long" })} · AI ?�面診斷</div>
         </div>
       </div>
 
@@ -808,10 +808,10 @@ export default function App() {
         {/* Market cards */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, margin: "12px 0" }}>
           {[
-            { label: "加權指數", val: "47,183", sub: "▲ 0.16%", col: "#ef4444" },
-            { label: "可買進", val: `${buyCount}`, sub: `${strongBuy} 強買`, col: "#ef4444" },
-            { label: "應賣出", val: `${sellCount}`, sub: "注意減碼", col: "#22c55e" },
-            { label: "自選股", val: `${watchlist.list.length}`, sub: "追蹤中", col: "#f59e0b" },
+            { label: "?��??�數", val: "47,183", sub: "??0.16%", col: "#ef4444" },
+            { label: "?�買??, val: `${buyCount}`, sub: `${strongBuy} 強買`, col: "#ef4444" },
+            { label: "?�賣??, val: `${sellCount}`, sub: "注�?減碼", col: "#22c55e" },
+            { label: "?�選??, val: `${watchlist.list.length}`, sub: "追蹤�?, col: "#f59e0b" },
           ].map((c, i) => (
             <div key={i} style={{ background: "#111", borderRadius: 8, padding: "7px 8px", border: "1px solid #1a1a1a" }}>
               <div style={{ fontSize: 12, color: "#bbb" }}>{c.label}</div>
@@ -824,10 +824,10 @@ export default function App() {
         {/* Tab nav */}
         <div style={{ display: "flex", background: "#111", borderRadius: 10, padding: 3, marginBottom: 14, border: "1px solid #1a1a1a", gap: 2 }}>
           {[
-            { key: "search", icon: "🔍", label: "診斷" },
-            { key: "watchlist", icon: "⭐", label: `自選${watchlist.list.length > 0 ? ` ${watchlist.list.length}` : ""}` },
-            { key: "buy", icon: "📈", label: "買進" },
-            { key: "sell", icon: "📉", label: "賣出" },
+            { key: "search", icon: "??", label: "診斷" },
+            { key: "watchlist", icon: "�?, label: `?�選${watchlist.list.length > 0 ? ` ${watchlist.list.length}` : ""}` },
+            { key: "buy", icon: "??", label: "買�? },
+            { key: "sell", icon: "??", label: "�?��" },
           ].map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
               style={{ flex: 1, padding: "7px 2px", borderRadius: 7, border: "none", cursor: "pointer", fontSize: 15, fontWeight: tab === t.key ? 600 : 400, transition: "all 0.2s",
@@ -849,12 +849,12 @@ export default function App() {
 
         {/* Footer */}
         <div style={{ marginTop: 20, padding: 12, background: "#0d0d0d", borderRadius: 10, border: "1px solid #151515" }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: "#aaa", marginBottom: 4 }}>📐 分析方法</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#aaa", marginBottom: 4 }}>?? ?��??��?</div>
           <div style={{ fontSize: 13, color: "#999", lineHeight: 1.7 }}>
-            六維綜合評分（KD/RSI/MACD/均線/法人/估值）＋ AI 即時財報健檢（營收成長/EPS/毛利率/ROE/負債比）＋ 即時新聞 AI 解讀利多利空。自選股追蹤儲存於瀏覽器。所有內容僅供參考，不構成投資建議。
+            ?�維綜�?評�?（KD/RSI/MACD/?��?/法人/估值�?�?AI ?��?財報?�檢（�??��???EPS/毛利??ROE/負債比�?�??��??��? AI �???��??�空?�自?�股追蹤?��??�瀏覽?�。�??�內容�?供�??��?不�??��?資建議�?
           </div>
         </div>
-        <div style={{ marginTop: 10, textAlign: "center", fontSize: 13, color: "#777" }}>台股雷達 v3.0 © 2026</div>
+        <div style={{ marginTop: 10, textAlign: "center", fontSize: 13, color: "#777" }}>?�股?��? v4.1 © 2026</div>
       </div>
     </div>
   );
