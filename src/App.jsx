@@ -663,110 +663,171 @@ function TabWatchlist({ watchlist, apiKey }) {
 }
 
 // ====================================
-// TAB 3/4: 買進 / 賣出清單
+// TAB 3/4: AI 即時掃描 買進 / 賣出
 // ====================================
-function TabList({ mode, watchlist }) {
-  const [sector, setSector] = useState("全部");
-  const [sortKey, setSortKey] = useState("score");
-  const [sortDir, setSortDir] = useState("desc");
-  const [search, setSearch] = useState("");
+const SCAN_STOCKS = ["2330 台積電", "2317 鴻海", "2454 聯發科", "2382 廣達", "3231 緯創", "2308 台達電", "2881 富邦金", "2882 國泰金", "2603 長榮", "3661 世芯-KY", "2345 智邦", "6669 緯穎", "2357 華碩", "2409 友達", "2002 中鋼", "6770 力積電"];
+
+function TabScan({ mode, watchlist, apiKey }) {
+  const [stocks, setStocks] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("tw-stock-scan")) || []; }
+    catch { return []; }
+  });
+  const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [lastScan, setLastScan] = useState(() => localStorage.getItem("tw-stock-scan-time") || "");
   const [selected, setSelected] = useState(null);
 
-  const sectors = ["全部", ...Array.from(new Set(STOCKS.map(s => s.sector)))];
-  const enriched = STOCKS.map(s => {
-    const sig = getSignal(s);
-    const change = s.price - s.prev;
-    const pct = ((change / s.prev) * 100).toFixed(2);
-    return { ...s, ...sig, change: change.toFixed(2), pct, isUp: change > 0 };
-  });
-  const filtered = enriched.filter(s => {
-    if (sector !== "全部" && s.sector !== sector) return false;
-    if (search && !s.name.includes(search) && !s.id.includes(search)) return false;
-    if (mode === "buy" && s.score < 0) return false;
-    if (mode === "sell" && s.score >= 0) return false;
+  const scan = async () => {
+    if (!apiKey.hasKey) return;
+    setLoading(true); setProgress("正在掃描熱門股…");
+    try {
+      const text = await callAI(`你是台股分析師。請搜尋以下 16 檔台股的「今日最新收盤價」和「漲跌幅」，並給出買賣判定。
+
+股票清單：${SCAN_STOCKS.join("、")}
+
+請嚴格用以下 JSON 格式回答，不要加任何其他文字，只回傳 JSON：
+[
+  {"id":"2330","name":"台積電","price":1234,"change":"+1.5%","verdict":"買進","reason":"站穩均線之上，外資連續買超","sector":"半導體"},
+  ...
+]
+
+verdict 只能是以下五種之一：強力買進、買進、觀望、賣出、強力賣出
+reason 用一句話說明理由
+sector 填寫產業類別
+
+重要：一定要回傳完整 16 檔的 JSON 陣列。`, apiKey.key, apiKey.provider);
+
+      // Parse JSON from response
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        setStocks(parsed);
+        localStorage.setItem("tw-stock-scan", JSON.stringify(parsed));
+        const timeStr = new Date().toLocaleString("zh-TW");
+        setLastScan(timeStr);
+        localStorage.setItem("tw-stock-scan-time", timeStr);
+      }
+    } catch (e) {
+      setProgress("掃描失敗：" + e.message);
+      setLoading(false);
+      return;
+    }
+    setLoading(false); setProgress("");
+  };
+
+  const verdictColors = { "強力買進": "#dc2626", "買進": "#ef4444", "觀望": "#f59e0b", "賣出": "#22c55e", "強力賣出": "#16a34a" };
+  const verdictScore = { "強力買進": 5, "買進": 4, "觀望": 3, "賣出": 2, "強力賣出": 1 };
+
+  const filtered = stocks.filter(s => {
+    if (mode === "buy" && (s.verdict === "賣出" || s.verdict === "強力賣出")) return false;
+    if (mode === "sell" && (s.verdict === "買進" || s.verdict === "強力買進" || s.verdict === "觀望")) return false;
     return true;
   }).sort((a, b) => {
-    const k = { score: "score", change: "pct", volume: "volume", pe: "pe", dy: "dy" };
-    const av = parseFloat(a[k[sortKey]] ?? a.price);
-    const bv = parseFloat(b[k[sortKey]] ?? b.price);
-    return sortDir === "desc" ? bv - av : av - bv;
+    if (mode === "buy") return (verdictScore[b.verdict] || 0) - (verdictScore[a.verdict] || 0);
+    return (verdictScore[a.verdict] || 0) - (verdictScore[b.verdict] || 0);
   });
-  const toggleSort = k => { if (sortKey === k) setSortDir(d => d === "desc" ? "asc" : "desc"); else { setSortKey(k); setSortDir("desc"); } };
+
+  const buyCount = stocks.filter(s => s.verdict === "買進" || s.verdict === "強力買進").length;
+  const sellCount = stocks.filter(s => s.verdict === "賣出" || s.verdict === "強力賣出").length;
 
   return (
-    <>
-      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜尋代號/名稱"
-          style={{ flex: 1, background: "#111", border: "1px solid #1e1e1e", borderRadius: 6, padding: "6px 10px", color: "#e5e5e5", fontSize: 16, outline: "none" }} />
+    <div>
+      {/* Scan header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>
+            {mode === "buy" ? "📈 可買進" : "📉 應賣出"}
+            {stocks.length > 0 && <span style={{ fontSize: 15, color: "#999", marginLeft: 8 }}>({filtered.length} 檔)</span>}
+          </div>
+          {lastScan && <div style={{ fontSize: 13, color: "#999", marginTop: 2 }}>上次掃描：{lastScan}</div>}
+        </div>
+        <button onClick={scan} disabled={loading || !apiKey.hasKey}
+          style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: loading ? "#333" : "linear-gradient(135deg, #ef4444, #f97316)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: loading ? "wait" : "pointer" }}>
+          {loading ? "掃描中…" : stocks.length > 0 ? "🔄 重新掃描" : "🔍 開始掃描"}
+        </button>
       </div>
-      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
-        {sectors.map(s => (
-          <button key={s} onClick={() => setSector(s)}
-            style={{ padding: "2px 8px", fontSize: 14, borderRadius: 8, border: sector === s ? "1px solid #333" : "1px solid #1a1a1a", cursor: "pointer", background: sector === s ? "#1f1f1f" : "#0d0d0d", color: sector === s ? "#e5e5e5" : "#555" }}>{s}</button>
-        ))}
-      </div>
-      <div style={{ display: "flex", gap: 4, marginBottom: 10, flexWrap: "wrap" }}>
-        {[["score","訊號"], ["change","漲跌"], ["volume","量"], ["pe","PE"], ["dy","殖利率"]].map(([k, l]) => (
-          <button key={k} onClick={() => toggleSort(k)}
-            style={{ padding: "2px 8px", fontSize: 14, borderRadius: 4, border: sortKey === k ? "1px solid #333" : "1px solid transparent", background: sortKey === k ? "#1a1a1a" : "transparent", color: sortKey === k ? "#ccc" : "#444", cursor: "pointer" }}>
-            {l}{sortKey === k ? (sortDir === "desc" ? "↓" : "↑") : ""}
-          </button>
-        ))}
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-        {filtered.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#aaa", fontSize: 16 }}>無符合條件的股票</div>}
-        {filtered.map(stock => {
-          const open = selected === stock.id;
-          const ti = stock.foreignBuy + stock.trustBuy + stock.dealerBuy;
-          return (
-            <div key={stock.id} onClick={() => setSelected(open ? null : stock.id)}
-              style={{ background: open ? "#151515" : "#0f0f0f", border: `1px solid ${open ? "#2a2a2a" : "#181818"}`, borderRadius: 10, padding: "10px 12px", cursor: "pointer", transition: "all 0.15s" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ width: 6, height: 6, borderRadius: 3, background: stock.color, flexShrink: 0 }} />
-                <div style={{ minWidth: 52 }}>
-                  <div style={{ fontSize: 17, fontWeight: 700 }}>{stock.name}</div>
-                  <div style={{ fontSize: 14, color: "#bbb" }}>{stock.id}</div>
-                </div>
-                <Spark stock={stock} />
-                <div style={{ flex: 1, textAlign: "right" }}>
-                  <div style={{ fontSize: 20, fontWeight: 700, color: stock.isUp ? "#ef4444" : "#22c55e" }}>{stock.price}</div>
-                  <div style={{ fontSize: 14, color: stock.isUp ? "#ef4444" : "#22c55e" }}>{stock.isUp ? "+" : ""}{stock.pct}%</div>
-                </div>
-                <div style={{ padding: "3px 8px", borderRadius: 6, fontSize: 14, fontWeight: 600, background: stock.color + "15", color: stock.color, whiteSpace: "nowrap" }}>{stock.signal}</div>
-              </div>
-              {open && (
-                <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #1e1e1e" }} onClick={e => e.stopPropagation()}>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
-                    <GaugeBar label="K" value={stock.k} zones={[{ from: 0, to: 20, color: "#22c55e" }, { from: 20, to: 80, color: "#f97316" }, { from: 80, to: 100, color: "#ef4444" }]} />
-                    <GaugeBar label="D" value={stock.d} zones={[{ from: 0, to: 20, color: "#22c55e" }, { from: 20, to: 80, color: "#f97316" }, { from: 80, to: 100, color: "#ef4444" }]} />
-                    <GaugeBar label="RSI" value={stock.rsi} zones={[{ from: 0, to: 30, color: "#22c55e" }, { from: 30, to: 70, color: "#a3a3a3" }, { from: 70, to: 100, color: "#ef4444" }]} />
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 4, marginBottom: 10 }}>
-                    {[["外資", stock.foreignBuy], ["投信", stock.trustBuy], ["自營", stock.dealerBuy], ["合計", ti]].map(([l, v]) => (
-                      <div key={l} style={{ background: "#0a0a0a", borderRadius: 6, padding: "5px 6px", textAlign: "center" }}>
-                        <div style={{ fontSize: 13, color: "#bbb" }}>{l}</div>
-                        <div style={{ fontSize: 15, fontWeight: 600, color: v > 0 ? "#ef4444" : v < 0 ? "#22c55e" : "#666" }}>{v > 0 ? "+" : ""}{(v / 1000).toFixed(1)}k</div>
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                    {stock.reasons.map((r, i) => <span key={i} style={{ padding: "2px 6px", borderRadius: 6, fontSize: 13, background: "#141414", color: "#ccc", border: "1px solid #1e1e1e" }}>{r}</span>)}
-                  </div>
-                  <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
-                    <button onClick={() => watchlist.add({ id: stock.id, name: stock.name, verdict: stock.signal })}
-                      disabled={watchlist.has(stock.id)}
-                      style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #333", background: "#141414", color: watchlist.has(stock.id) ? "#555" : "#f59e0b", fontSize: 14, cursor: "pointer" }}>
-                      {watchlist.has(stock.id) ? "✓ 已追蹤" : "⭐ 加入自選"}
-                    </button>
-                    <span style={{ fontSize: 14, color: "#999", lineHeight: "24px" }}>量 {stock.volume.toLocaleString()} 張 · {stock.sector}</span>
-                  </div>
-                </div>
-              )}
+
+      {/* No API key */}
+      {!apiKey.hasKey && (
+        <div style={{ padding: 30, textAlign: "center", background: "#111", borderRadius: 12, border: "1px solid #1e1e1e" }}>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>🔑</div>
+          <div style={{ fontSize: 16, color: "#f59e0b" }}>請先到 ⚙️ 設定 API Key</div>
+        </div>
+      )}
+
+      {/* Loading */}
+      {loading && (
+        <div style={{ padding: 36, textAlign: "center", background: "#111", borderRadius: 12, border: "1px solid #1e1e1e" }}>
+          <div style={{ display: "inline-block", width: 36, height: 36, border: "3px solid #222", borderTopColor: "#ef4444", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+          <div style={{ marginTop: 12, fontSize: 15, color: "#ccc" }}>AI 正在掃描 16 檔熱門股…</div>
+          <div style={{ marginTop: 4, fontSize: 13, color: "#999" }}>搜尋最新股價、分析買賣訊號中</div>
+          <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+        </div>
+      )}
+
+      {/* Error */}
+      {progress && !loading && (
+        <div style={{ padding: 12, background: "#2a1515", borderRadius: 8, fontSize: 14, color: "#fca5a5", marginBottom: 10 }}>
+          ❌ {progress}
+        </div>
+      )}
+
+      {/* Results */}
+      {!loading && stocks.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          {filtered.length === 0 && (
+            <div style={{ padding: 32, textAlign: "center", color: "#999", fontSize: 15 }}>
+              {mode === "buy" ? "目前沒有建議買進的股票" : "目前沒有建議賣出的股票"}
             </div>
-          );
-        })}
-      </div>
-    </>
+          )}
+          {filtered.map(stock => {
+            const isUp = stock.change?.startsWith("+");
+            const open = selected === stock.id;
+            const vc = verdictColors[stock.verdict] || "#999";
+            return (
+              <div key={stock.id} onClick={() => setSelected(open ? null : stock.id)}
+                style={{ background: open ? "#151515" : "#0f0f0f", border: `1px solid ${open ? "#2a2a2a" : "#181818"}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: 3, background: vc, flexShrink: 0 }} />
+                  <div style={{ minWidth: 60 }}>
+                    <div style={{ fontSize: 17, fontWeight: 700 }}>{stock.name}</div>
+                    <div style={{ fontSize: 13, color: "#999" }}>{stock.id}{stock.sector ? ` · ${stock.sector}` : ""}</div>
+                  </div>
+                  <div style={{ flex: 1, textAlign: "right" }}>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: isUp ? "#ef4444" : "#22c55e" }}>{stock.price}</div>
+                    <div style={{ fontSize: 14, color: isUp ? "#ef4444" : "#22c55e" }}>{stock.change}</div>
+                  </div>
+                  <div style={{ padding: "4px 10px", borderRadius: 6, fontSize: 14, fontWeight: 600, background: vc + "18", color: vc, whiteSpace: "nowrap" }}>
+                    {stock.verdict}
+                  </div>
+                </div>
+                {open && (
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #1e1e1e" }} onClick={e => e.stopPropagation()}>
+                    <div style={{ fontSize: 15, color: "#ccc", lineHeight: 1.8, marginBottom: 8 }}>
+                      📝 {stock.reason}
+                    </div>
+                    <button onClick={() => watchlist.add({ id: stock.id, name: stock.name, verdict: stock.verdict })}
+                      disabled={watchlist.has(stock.id)}
+                      style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #333", background: "#141414", color: watchlist.has(stock.id) ? "#666" : "#f59e0b", fontSize: 14, cursor: "pointer" }}>
+                      {watchlist.has(stock.id) ? "✓ 已追蹤" : "⭐ 加入自選股"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!loading && stocks.length === 0 && apiKey.hasKey && (
+        <div style={{ padding: 40, textAlign: "center", background: "#111", borderRadius: 12, border: "1px solid #1e1e1e" }}>
+          <div style={{ fontSize: 32, marginBottom: 10 }}>{mode === "buy" ? "📈" : "📉"}</div>
+          <div style={{ fontSize: 16, color: "#ccc", marginBottom: 6 }}>尚未掃描</div>
+          <div style={{ fontSize: 14, color: "#999" }}>點上方「開始掃描」，AI 會即時分析 16 檔熱門股的買賣訊號</div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -780,10 +841,10 @@ export default function App() {
   const watchlist = useWatchlist();
   const apiKey = useApiKey();
 
-  const enriched = STOCKS.map(s => ({ ...s, ...getSignal(s) }));
-  const buyCount = enriched.filter(s => s.score >= 0).length;
-  const sellCount = enriched.filter(s => s.score < 0).length;
-  const strongBuy = enriched.filter(s => s.score >= 3).length;
+  const enriched = [];
+  const buyCount = "—";
+  const sellCount = "—";
+  const strongBuy = "";
 
   return (
     <div style={{ minHeight: "100vh", background: "#0a0a0a", color: "#e5e5e5", fontFamily: "'Inter', 'Noto Sans TC', system-ui, sans-serif" }}>
@@ -809,8 +870,8 @@ export default function App() {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, margin: "12px 0" }}>
           {[
             { label: "加權指數", val: "47,183", sub: "▲ 0.16%", col: "#ef4444" },
-            { label: "可買進", val: `${buyCount}`, sub: `${strongBuy} 強買`, col: "#ef4444" },
-            { label: "應賣出", val: `${sellCount}`, sub: "注意減碼", col: "#22c55e" },
+            { label: "可買進", val: "—", sub: "掃描查看", col: "#ef4444" },
+            { label: "應賣出", val: "—", sub: "掃描查看", col: "#22c55e" },
             { label: "自選股", val: `${watchlist.list.length}`, sub: "追蹤中", col: "#f59e0b" },
           ].map((c, i) => (
             <div key={i} style={{ background: "#111", borderRadius: 8, padding: "7px 8px", border: "1px solid #1a1a1a" }}>
@@ -844,8 +905,8 @@ export default function App() {
         {/* Tab content */}
         {tab === "search" && <TabDiagnosis watchlist={watchlist} apiKey={apiKey} />}
         {tab === "watchlist" && <TabWatchlist watchlist={watchlist} apiKey={apiKey} />}
-        {tab === "buy" && <TabList mode="buy" watchlist={watchlist} />}
-        {tab === "sell" && <TabList mode="sell" watchlist={watchlist} />}
+        {tab === "buy" && <TabScan mode="buy" watchlist={watchlist} apiKey={apiKey} />}
+        {tab === "sell" && <TabScan mode="sell" watchlist={watchlist} apiKey={apiKey} />}
 
         {/* Footer */}
         <div style={{ marginTop: 20, padding: 12, background: "#0d0d0d", borderRadius: 10, border: "1px solid #151515" }}>
