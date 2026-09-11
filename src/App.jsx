@@ -59,7 +59,7 @@ function Spark({ stock, w = 72, h = 24 }) {
   });
   const min = Math.min(...pts), max = Math.max(...pts), range = max - min || 1;
   const path = pts.map((v, i) => `${(i / 19) * w},${h - ((v - min) / range) * h}`).join(" ");
-  return <svg width={w} height={h} style={{ display: "block" }}><polyline points={path} fill="none" stroke={stock.price >= stock.prev ? "#ef4444" : "#22c55e"} strokeWidth="1.5" strokeLinejoin="round" /></svg>;
+  return <svg width={w} height={h} style={{ display: "block" }}><polyline points={path} fill="none" stroke={stock.price >= stock.prev ? "#ef4444" : "#22c55e"} strokeWidth="2.5" strokeLinejoin="round" /></svg>;
 }
 
 function GaugeBar({ value, label, max = 100, zones }) {
@@ -69,11 +69,11 @@ function GaugeBar({ value, label, max = 100, zones }) {
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
-        <span style={{ fontSize: 10, color: "#666" }}>{label}</span>
-        <span style={{ fontSize: 11, fontWeight: 600, color: col }}>{value}</span>
+        <span style={{ fontSize: 14, color: "#ccc" }}>{label}</span>
+        <span style={{ fontSize: 15, fontWeight: 600, color: col }}>{value}</span>
       </div>
-      <div style={{ height: 3, background: "#222", borderRadius: 2 }}>
-        <div style={{ height: 3, width: `${pct}%`, background: col, borderRadius: 2, transition: "width 0.3s" }} />
+      <div style={{ height: 5, background: "#222", borderRadius: 2 }}>
+        <div style={{ height: 5, width: `${pct}%`, background: col, borderRadius: 2, transition: "width 0.3s" }} />
       </div>
     </div>
   );
@@ -93,18 +93,18 @@ function VerdictCard({ verdict, stockName, price, change }) {
     <div style={{ background: v.bg, border: `2px solid ${v.border}`, borderRadius: 12, padding: "16px 16px 14px", marginBottom: 12 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 28 }}>{v.icon}</span>
+          <span style={{ fontSize: 36 }}>{v.icon}</span>
           <div>
-            <div style={{ fontSize: 10, color: "#888" }}>AI 診斷結論</div>
-            <div style={{ fontSize: 24, fontWeight: 800, color: v.color, letterSpacing: 2 }}>{verdict}</div>
+            <div style={{ fontSize: 14, color: "#ddd" }}>AI 診斷結論</div>
+            <div style={{ fontSize: 30, fontWeight: 800, color: v.color, letterSpacing: 2 }}>{verdict}</div>
           </div>
         </div>
         <div style={{ textAlign: "right" }}>
-          {stockName && <div style={{ fontSize: 14, fontWeight: 700, color: "#e5e5e5" }}>{stockName}</div>}
-          {price && <div style={{ fontSize: 12, color: v.color }}>{price} {change || ""}</div>}
+          {stockName && <div style={{ fontSize: 18, fontWeight: 700, color: "#e5e5e5" }}>{stockName}</div>}
+          {price && <div style={{ fontSize: 16, color: v.color }}>{price} {change || ""}</div>}
         </div>
       </div>
-      <div style={{ fontSize: 11, color: "#888", lineHeight: 1.5 }}>{v.sub}</div>
+      <div style={{ fontSize: 15, color: "#ddd", lineHeight: 1.5 }}>{v.sub}</div>
     </div>
   );
 }
@@ -122,8 +122,8 @@ function ScoreRing({ score, label, size = 48 }) {
         <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#222" strokeWidth="4" />
         <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={col} strokeWidth="4" strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.5s" }} />
       </svg>
-      <div style={{ position: "relative", marginTop: -(size/2 + 8), fontSize: 13, fontWeight: 700, color: col, textAlign: "center", lineHeight: `${size}px`, height: size }}>{pct}</div>
-      <div style={{ fontSize: 9, color: "#666", marginTop: -4 }}>{label}</div>
+      <div style={{ position: "relative", marginTop: -(size/2 + 8), fontSize: 17, fontWeight: 700, color: col, textAlign: "center", lineHeight: `${size}px`, height: size }}>{pct}</div>
+      <div style={{ fontSize: 13, color: "#ccc", marginTop: -4 }}>{label}</div>
     </div>
   );
 }
@@ -184,11 +184,28 @@ function useWatchlist() {
   return { list, add, remove, has, update };
 }
 
+// --- API Key management ---
+function useApiKey() {
+  const [key, setKey] = useState(() => {
+    try { return localStorage.getItem("tw-stock-apikey") || ""; }
+    catch { return ""; }
+  });
+  const save = (k) => { setKey(k); localStorage.setItem("tw-stock-apikey", k); };
+  const clear = () => { setKey(""); localStorage.removeItem("tw-stock-apikey"); };
+  return { key, save, clear, hasKey: key.length > 10 };
+}
+
 // --- API call helper ---
-async function callAI(prompt) {
+async function callAI(prompt, apiKey) {
+  if (!apiKey) throw new Error("NO_KEY");
   const resp = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
       max_tokens: 1000,
@@ -196,18 +213,91 @@ async function callAI(prompt) {
       messages: [{ role: "user", content: prompt }],
     }),
   });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `API 錯誤 ${resp.status}`);
+  }
   const data = await resp.json();
   return data.content?.filter(i => i.type === "text").map(i => i.text).join("\n") || "";
+}
+
+// --- Settings Panel ---
+function SettingsPanel({ apiKey, onClose }) {
+  const [input, setInput] = useState(apiKey.key);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+
+  const testKey = async () => {
+    setTesting(true); setTestResult(null);
+    try {
+      await callAI("回答：連線成功", input);
+      setTestResult({ ok: true, msg: "✅ API Key 驗證成功！" });
+      apiKey.save(input);
+    } catch (e) {
+      setTestResult({ ok: false, msg: `❌ 驗證失敗：${e.message}` });
+    }
+    setTesting(false);
+  };
+
+  return (
+    <div style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 12, padding: 20, marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>⚙️ API 設定</div>
+        <button onClick={onClose} style={{ background: "none", border: "none", color: "#999", fontSize: 20, cursor: "pointer" }}>✕</button>
+      </div>
+
+      <div style={{ fontSize: 14, color: "#ccc", marginBottom: 12, lineHeight: 1.8 }}>
+        AI 診斷功能需要 Anthropic API Key 才能使用。
+        你的 Key 只會存在瀏覽器本機，不會上傳到任何伺服器。
+      </div>
+
+      <div style={{ fontSize: 14, color: "#bbb", marginBottom: 6 }}>API Key</div>
+      <input
+        value={input}
+        onChange={e => setInput(e.target.value)}
+        placeholder="sk-ant-api03-..."
+        type="password"
+        style={{ width: "100%", background: "#0a0a0a", border: "1px solid #333", borderRadius: 8, padding: "12px 14px", color: "#e5e5e5", fontSize: 15, outline: "none", marginBottom: 10, boxSizing: "border-box" }}
+      />
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <button onClick={testKey} disabled={testing || !input.trim()}
+          style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: "none", background: "linear-gradient(135deg, #ef4444, #f97316)", color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer" }}>
+          {testing ? "驗證中…" : "儲存並驗證"}
+        </button>
+        {apiKey.hasKey && (
+          <button onClick={() => { apiKey.clear(); setInput("", apiKey.key); setTestResult(null); }}
+            style={{ padding: "10px 16px", borderRadius: 8, border: "1px solid #333", background: "#1a1a1a", color: "#ef4444", fontSize: 14, cursor: "pointer" }}>
+            清除
+          </button>
+        )}
+      </div>
+
+      {testResult && (
+        <div style={{ padding: 10, borderRadius: 8, fontSize: 14, background: testResult.ok ? "#052e16" : "#2a1515", color: testResult.ok ? "#86efac" : "#fca5a5", border: `1px solid ${testResult.ok ? "#16a34a" : "#dc2626"}` }}>
+          {testResult.msg}
+        </div>
+      )}
+
+      <div style={{ marginTop: 14, padding: 12, background: "#0a0a0a", borderRadius: 8, fontSize: 13, color: "#999", lineHeight: 1.8 }}>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>如何取得 API Key？</div>
+        1. 到 <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style={{ color: "#f97316" }}>console.anthropic.com</a> 登入<br/>
+        2. 點選「Create Key」建立一組新的 Key<br/>
+        3. 複製貼到上方欄位即可
+      </div>
+    </div>
+  );
 }
 
 // ====================================
 // TAB 1: AI 個股診斷 + 財報健檢
 // ====================================
-function TabDiagnosis({ watchlist }) {
+function TabDiagnosis({ watchlist, apiKey }) {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState("");
   const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
   const [history, setHistory] = useState(() => {
     try { return JSON.parse(localStorage.getItem("tw-stock-history")) || []; }
     catch { return []; }
@@ -218,7 +308,8 @@ function TabDiagnosis({ watchlist }) {
   const search = async (q) => {
     const searchQ = q || query;
     if (!searchQ.trim()) return;
-    setLoading(true); setResult(null);
+    if (!apiKey.hasKey) { setError("請先到右上角 ⚙️ 設定 API Key 才能使用 AI 診斷"); return; }
+    setLoading(true); setResult(null); setError("");
     try {
       // Step 1: Technical + Verdict
       setStep("搜尋股價與技術指標…");
@@ -237,7 +328,7 @@ function TabDiagnosis({ watchlist }) {
 💪 信心度：[高/中/低]
 📝 一句話理由：[為什麼應該買或賣]
 🎯 建議策略：[具體操作，例如「分批買進，停損設在XX元」]
-⚠️ 最大風險：[主要風險]`);
+⚠️ 最大風險：[主要風險]`, apiKey.key);
 
       // Step 2: Financial report
       setStep("分析財報數據…");
@@ -267,7 +358,7 @@ function TabDiagnosis({ watchlist }) {
    - 負債比率：[數據]%
    - 流動比率：[數據]%
 
-📋 財報總評：[用2句話總結這家公司的財務狀況，是否值得投資]`);
+📋 財報總評：[用2句話總結這家公司的財務狀況，是否值得投資]`, apiKey.key);
 
       // Step 3: News
       setStep("搜尋最新相關新聞…");
@@ -285,7 +376,7 @@ function TabDiagnosis({ watchlist }) {
 
 （列出 3-5 則）
 
-📊 新聞面總評：整體偏[利多/利空/中性]，[1句話說明]`);
+📊 新聞面總評：整體偏[利多/利空/中性]，[1句話說明]`, apiKey.key);
 
       const verdict = parseVerdict(techText);
       const info = parseStockInfo(techText);
@@ -293,7 +384,8 @@ function TabDiagnosis({ watchlist }) {
       setResult({ query: searchQ, techText, finText, newsText, verdict, ...info, finScores, time: new Date() });
       setHistory(h => [{ query: searchQ, verdict, time: new Date().toISOString() }, ...h.slice(0, 14)]);
     } catch (e) {
-      setResult({ query: searchQ, techText: "連線失敗，請稍後再試。", finText: "", newsText: "", verdict: "觀望", time: new Date() });
+      const msg = e.message === "NO_KEY" ? "請先設定 API Key" : e.message || "連線失敗，請稍後再試";
+      setResult({ query: searchQ, techText: msg, finText: "", newsText: "", verdict: "觀望", time: new Date() });
     }
     setLoading(false); setStep("");
   };
@@ -307,18 +399,18 @@ function TabDiagnosis({ watchlist }) {
       {/* Search bar */}
       <div style={{ padding: "16px 16px 12px", background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: "linear-gradient(135deg, #ef4444, #f97316)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🔍</div>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: "linear-gradient(135deg, #ef4444, #f97316)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>🔍</div>
           <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#e5e5e5" }}>個股 AI 全面診斷</div>
-            <div style={{ fontSize: 10, color: "#666" }}>技術面 + 財報健檢 + 即時新聞，三合一分析</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: "#e5e5e5" }}>個股 AI 全面診斷</div>
+            <div style={{ fontSize: 14, color: "#ccc" }}>技術面 + 財報健檢 + 即時新聞，三合一分析</div>
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === "Enter" && search()}
             placeholder="輸入股票代號或名稱，例：2330、台積電"
-            style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "10px 14px", color: "#e5e5e5", fontSize: 14, outline: "none" }} />
+            style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "10px 14px", color: "#e5e5e5", fontSize: 18, outline: "none" }} />
           <button onClick={() => search()} disabled={loading}
-            style={{ background: loading ? "#333" : "linear-gradient(135deg, #ef4444, #f97316)", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: loading ? "wait" : "pointer", whiteSpace: "nowrap" }}>
+            style={{ background: loading ? "#333" : "linear-gradient(135deg, #ef4444, #f97316)", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 17, fontWeight: 600, cursor: loading ? "wait" : "pointer", whiteSpace: "nowrap" }}>
             {loading ? "分析中…" : "全面診斷"}
           </button>
         </div>
@@ -326,21 +418,40 @@ function TabDiagnosis({ watchlist }) {
 
       {/* Quick picks */}
       <div style={{ padding: "8px 16px", borderBottom: "1px solid #1a1a1a", display: "flex", gap: 5, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 10, color: "#444", lineHeight: "24px" }}>快查：</span>
+        <span style={{ fontSize: 14, color: "#aaa", lineHeight: "24px" }}>快查：</span>
         {quickStocks.map(s => (
           <button key={s} onClick={() => { setQuery(s); search(s); }}
-            style={{ padding: "2px 8px", borderRadius: 8, fontSize: 10, border: "1px solid #222", background: "#141414", color: "#888", cursor: "pointer" }}>{s}</button>
+            style={{ padding: "2px 8px", borderRadius: 8, fontSize: 14, border: "1px solid #222", background: "#141414", color: "#ddd", cursor: "pointer" }}>{s}</button>
         ))}
       </div>
+
+      {/* No API Key warning */}
+      {!apiKey.hasKey && !loading && !result && (
+        <div style={{ margin: "12px 16px", padding: 16, background: "#1a1510", border: "1px solid #f59e0b44", borderRadius: 10, textAlign: "center" }}>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>🔑</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: "#f59e0b", marginBottom: 6 }}>需要設定 API Key</div>
+          <div style={{ fontSize: 14, color: "#ccc", lineHeight: 1.7 }}>
+            AI 診斷功能需要 Anthropic API Key。<br/>
+            請點右上角 ⚙️ 進行設定。
+          </div>
+        </div>
+      )}
+
+      {/* Error */}
+      {error && (
+        <div style={{ margin: "8px 16px", padding: 12, background: "#2a1515", border: "1px solid #dc2626", borderRadius: 8, fontSize: 14, color: "#fca5a5" }}>
+          ❌ {error}
+        </div>
+      )}
 
       {/* Loading */}
       {loading && (
         <div style={{ padding: 36, textAlign: "center" }}>
           <div style={{ display: "inline-block", width: 36, height: 36, border: "3px solid #222", borderTopColor: "#ef4444", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-          <div style={{ marginTop: 12, fontSize: 13, color: "#888" }}>{step}</div>
+          <div style={{ marginTop: 12, fontSize: 17, color: "#ddd" }}>{step}</div>
           <div style={{ marginTop: 6, display: "flex", justifyContent: "center", gap: 4 }}>
             {["技術面", "財報", "新聞"].map((s, i) => (
-              <div key={s} style={{ padding: "2px 8px", borderRadius: 8, fontSize: 10,
+              <div key={s} style={{ padding: "2px 8px", borderRadius: 8, fontSize: 14,
                 background: step.includes("技術") && i === 0 ? "#f97316" + "30" : step.includes("財報") && i === 1 ? "#f97316" + "30" : step.includes("新聞") && i === 2 ? "#f97316" + "30" : "#1a1a1a",
                 color: step.includes("技術") && i === 0 ? "#f97316" : step.includes("財報") && i === 1 ? "#f97316" : step.includes("新聞") && i === 2 ? "#f97316" : "#444" }}>{s}</div>
             ))}
@@ -358,7 +469,7 @@ function TabDiagnosis({ watchlist }) {
           {/* Add to watchlist button */}
           <button onClick={() => watchlist.add({ id: result.query, name: result.stockName || result.query, verdict: result.verdict, time: new Date().toISOString(), techText: result.techText, finText: result.finText })}
             disabled={watchlist.has(result.query)}
-            style={{ width: "100%", padding: "8px 0", borderRadius: 8, border: "1px solid #333", background: watchlist.has(result.query) ? "#1a1a1a" : "#141414", color: watchlist.has(result.query) ? "#555" : "#f59e0b", fontSize: 12, fontWeight: 600, cursor: "pointer", marginBottom: 12 }}>
+            style={{ width: "100%", padding: "8px 0", borderRadius: 8, border: "1px solid #333", background: watchlist.has(result.query) ? "#1a1a1a" : "#141414", color: watchlist.has(result.query) ? "#555" : "#f59e0b", fontSize: 16, fontWeight: 600, cursor: "pointer", marginBottom: 12 }}>
             {watchlist.has(result.query) ? "✓ 已加入自選股" : "⭐ 加入自選股追蹤"}
           </button>
 
@@ -379,12 +490,12 @@ function TabDiagnosis({ watchlist }) {
           ].filter(s => s.content).map(section => (
             <div key={section.key} style={{ marginBottom: 8 }}>
               <button onClick={() => setOpenSection(prev => ({ ...prev, [section.key]: !prev[section.key] }))}
-                style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", background: "#0d0d0d", border: "1px solid #1a1a1a", borderRadius: openSection[section.key] ? "8px 8px 0 0" : 8, color: "#ccc", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", background: "#0d0d0d", border: "1px solid #1a1a1a", borderRadius: openSection[section.key] ? "8px 8px 0 0" : 8, color: "#ccc", fontSize: 16, fontWeight: 600, cursor: "pointer" }}>
                 <span>{section.icon} {section.title}</span>
-                <span style={{ fontSize: 10, color: "#555" }}>{openSection[section.key] ? "▼" : "▶"}</span>
+                <span style={{ fontSize: 14, color: "#bbb" }}>{openSection[section.key] ? "▼" : "▶"}</span>
               </button>
               {openSection[section.key] && (
-                <div style={{ background: "#0a0a0a", borderRadius: "0 0 8px 8px", padding: 12, fontSize: 12, lineHeight: 1.9, color: "#bbb", whiteSpace: "pre-wrap", wordBreak: "break-word", borderLeft: "3px solid #f97316", maxHeight: 350, overflowY: "auto" }}>
+                <div style={{ background: "#0a0a0a", borderRadius: "0 0 8px 8px", padding: 12, fontSize: 16, lineHeight: 1.9, color: "#bbb", whiteSpace: "pre-wrap", wordBreak: "break-word", borderLeft: "3px solid #f97316", maxHeight: 350, overflowY: "auto" }}>
                   {section.content}
                 </div>
               )}
@@ -393,10 +504,10 @@ function TabDiagnosis({ watchlist }) {
 
           {/* Actions */}
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button onClick={() => search(result.query)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid #222", background: "#141414", color: "#888", fontSize: 11, cursor: "pointer" }}>🔄 重新分析</button>
-            <button onClick={() => setResult(null)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid #222", background: "#141414", color: "#888", fontSize: 11, cursor: "pointer" }}>🔍 查詢其他</button>
+            <button onClick={() => search(result.query)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid #222", background: "#141414", color: "#ddd", fontSize: 15, cursor: "pointer" }}>🔄 重新分析</button>
+            <button onClick={() => setResult(null)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid #222", background: "#141414", color: "#ddd", fontSize: 15, cursor: "pointer" }}>🔍 查詢其他</button>
           </div>
-          <div style={{ marginTop: 6, padding: "5px 10px", background: "#0a0a0a", borderRadius: 6, fontSize: 9, color: "#333", textAlign: "center" }}>
+          <div style={{ marginTop: 6, padding: "5px 10px", background: "#0a0a0a", borderRadius: 6, fontSize: 13, color: "#999", textAlign: "center" }}>
             ⚠️ AI 分析僅供學習參考，不構成投資建議。投資有風險，請自行判斷。
           </div>
         </div>
@@ -406,16 +517,16 @@ function TabDiagnosis({ watchlist }) {
       {history.length > 0 && !loading && !result && (
         <div style={{ padding: "10px 16px 14px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-            <span style={{ fontSize: 10, color: "#444" }}>查詢紀錄</span>
+            <span style={{ fontSize: 14, color: "#aaa" }}>查詢紀錄</span>
             <button onClick={() => { setHistory([]); localStorage.removeItem("tw-stock-history"); }}
-              style={{ fontSize: 9, color: "#333", background: "none", border: "none", cursor: "pointer" }}>清除</button>
+              style={{ fontSize: 13, color: "#999", background: "none", border: "none", cursor: "pointer" }}>清除</button>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
             {history.map((h, i) => (
               <button key={i} onClick={() => { setQuery(h.query); search(h.query); }}
-                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 10px", borderRadius: 6, border: "1px solid #1a1a1a", background: "#0d0d0d", color: "#888", cursor: "pointer", fontSize: 11, textAlign: "left" }}>
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 10px", borderRadius: 6, border: "1px solid #1a1a1a", background: "#0d0d0d", color: "#ddd", cursor: "pointer", fontSize: 15, textAlign: "left" }}>
                 <span>{h.query}</span>
-                <span style={{ fontSize: 10, fontWeight: 600, color: verdictColors[h.verdict] || "#888", padding: "1px 6px", borderRadius: 4, background: (verdictColors[h.verdict] || "#888") + "15" }}>{h.verdict}</span>
+                <span style={{ fontSize: 14, fontWeight: 600, color: verdictColors[h.verdict] || "#888", padding: "1px 6px", borderRadius: 4, background: (verdictColors[h.verdict] || "#888") + "15" }}>{h.verdict}</span>
               </button>
             ))}
           </div>
@@ -428,7 +539,7 @@ function TabDiagnosis({ watchlist }) {
 // ====================================
 // TAB 2: 自選股追蹤
 // ====================================
-function TabWatchlist({ watchlist }) {
+function TabWatchlist({ watchlist, apiKey }) {
   const [refreshing, setRefreshing] = useState(null);
 
   const refresh = async (item) => {
@@ -439,7 +550,7 @@ function TabWatchlist({ watchlist }) {
 用以下格式簡短回答（繁體中文）：
 💰 [股價] 元（[漲跌幅%]）
 🎯 判定：【買進/賣出/觀望】
-📝 [一句話理由]`);
+📝 [一句話理由]`, apiKey.key);
       const verdict = parseVerdict(text);
       watchlist.update(item.id, { latestInfo: text, verdict, lastRefresh: new Date().toISOString() });
     } catch {}
@@ -457,9 +568,9 @@ function TabWatchlist({ watchlist }) {
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>⭐ 自選股追蹤 ({watchlist.list.length})</div>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>⭐ 自選股追蹤 ({watchlist.list.length})</div>
         {watchlist.list.length > 0 && (
-          <button onClick={refreshAll} style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #333", background: "#141414", color: "#f59e0b", fontSize: 11, cursor: "pointer" }}>
+          <button onClick={refreshAll} style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #333", background: "#141414", color: "#f59e0b", fontSize: 15, cursor: "pointer" }}>
             🔄 全部更新
           </button>
         )}
@@ -468,8 +579,8 @@ function TabWatchlist({ watchlist }) {
       {watchlist.list.length === 0 ? (
         <div style={{ padding: 40, textAlign: "center", background: "#111", borderRadius: 12, border: "1px solid #1e1e1e" }}>
           <div style={{ fontSize: 32, marginBottom: 10 }}>⭐</div>
-          <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>還沒有自選股</div>
-          <div style={{ fontSize: 11, color: "#444" }}>到「個股診斷」查詢後，點「加入自選股」即可追蹤</div>
+          <div style={{ fontSize: 17, color: "#ccc", marginBottom: 4 }}>還沒有自選股</div>
+          <div style={{ fontSize: 15, color: "#aaa" }}>到「個股診斷」查詢後，點「加入自選股」即可追蹤</div>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -477,29 +588,29 @@ function TabWatchlist({ watchlist }) {
             <div key={item.id} style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 10, padding: 12 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 14, fontWeight: 700 }}>{item.name || item.id}</span>
+                  <span style={{ fontSize: 18, fontWeight: 700 }}>{item.name || item.id}</span>
                   {item.verdict && (
-                    <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 6, color: verdictColors[item.verdict] || "#888", background: (verdictColors[item.verdict] || "#888") + "15" }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, padding: "2px 8px", borderRadius: 6, color: verdictColors[item.verdict] || "#888", background: (verdictColors[item.verdict] || "#888") + "15" }}>
                       {item.verdict}
                     </span>
                   )}
                 </div>
                 <div style={{ display: "flex", gap: 4 }}>
                   <button onClick={() => refresh(item)} disabled={refreshing === item.id}
-                    style={{ padding: "3px 8px", borderRadius: 4, border: "1px solid #222", background: "#0d0d0d", color: "#888", fontSize: 10, cursor: "pointer" }}>
+                    style={{ padding: "3px 8px", borderRadius: 4, border: "1px solid #222", background: "#0d0d0d", color: "#ddd", fontSize: 14, cursor: "pointer" }}>
                     {refreshing === item.id ? "⏳" : "🔄"}
                   </button>
                   <button onClick={() => watchlist.remove(item.id)}
-                    style={{ padding: "3px 8px", borderRadius: 4, border: "1px solid #222", background: "#0d0d0d", color: "#555", fontSize: 10, cursor: "pointer" }}>✕</button>
+                    style={{ padding: "3px 8px", borderRadius: 4, border: "1px solid #222", background: "#0d0d0d", color: "#bbb", fontSize: 14, cursor: "pointer" }}>✕</button>
                 </div>
               </div>
               {item.latestInfo && (
-                <div style={{ fontSize: 11, lineHeight: 1.7, color: "#aaa", whiteSpace: "pre-wrap", background: "#0a0a0a", borderRadius: 6, padding: 8 }}>
+                <div style={{ fontSize: 15, lineHeight: 1.7, color: "#aaa", whiteSpace: "pre-wrap", background: "#0a0a0a", borderRadius: 6, padding: 8 }}>
                   {item.latestInfo}
                 </div>
               )}
               {item.lastRefresh && (
-                <div style={{ fontSize: 9, color: "#333", marginTop: 4 }}>
+                <div style={{ fontSize: 13, color: "#999", marginTop: 4 }}>
                   上次更新：{new Date(item.lastRefresh).toLocaleString("zh-TW")}
                 </div>
               )}
@@ -546,24 +657,24 @@ function TabList({ mode, watchlist }) {
     <>
       <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜尋代號/名稱"
-          style={{ flex: 1, background: "#111", border: "1px solid #1e1e1e", borderRadius: 6, padding: "6px 10px", color: "#e5e5e5", fontSize: 12, outline: "none" }} />
+          style={{ flex: 1, background: "#111", border: "1px solid #1e1e1e", borderRadius: 6, padding: "6px 10px", color: "#e5e5e5", fontSize: 16, outline: "none" }} />
       </div>
       <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
         {sectors.map(s => (
           <button key={s} onClick={() => setSector(s)}
-            style={{ padding: "2px 8px", fontSize: 10, borderRadius: 8, border: sector === s ? "1px solid #333" : "1px solid #1a1a1a", cursor: "pointer", background: sector === s ? "#1f1f1f" : "#0d0d0d", color: sector === s ? "#e5e5e5" : "#555" }}>{s}</button>
+            style={{ padding: "2px 8px", fontSize: 14, borderRadius: 8, border: sector === s ? "1px solid #333" : "1px solid #1a1a1a", cursor: "pointer", background: sector === s ? "#1f1f1f" : "#0d0d0d", color: sector === s ? "#e5e5e5" : "#555" }}>{s}</button>
         ))}
       </div>
       <div style={{ display: "flex", gap: 4, marginBottom: 10, flexWrap: "wrap" }}>
         {[["score","訊號"], ["change","漲跌"], ["volume","量"], ["pe","PE"], ["dy","殖利率"]].map(([k, l]) => (
           <button key={k} onClick={() => toggleSort(k)}
-            style={{ padding: "2px 8px", fontSize: 10, borderRadius: 4, border: sortKey === k ? "1px solid #333" : "1px solid transparent", background: sortKey === k ? "#1a1a1a" : "transparent", color: sortKey === k ? "#ccc" : "#444", cursor: "pointer" }}>
+            style={{ padding: "2px 8px", fontSize: 14, borderRadius: 4, border: sortKey === k ? "1px solid #333" : "1px solid transparent", background: sortKey === k ? "#1a1a1a" : "transparent", color: sortKey === k ? "#ccc" : "#444", cursor: "pointer" }}>
             {l}{sortKey === k ? (sortDir === "desc" ? "↓" : "↑") : ""}
           </button>
         ))}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-        {filtered.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#444", fontSize: 12 }}>無符合條件的股票</div>}
+        {filtered.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#aaa", fontSize: 16 }}>無符合條件的股票</div>}
         {filtered.map(stock => {
           const open = selected === stock.id;
           const ti = stock.foreignBuy + stock.trustBuy + stock.dealerBuy;
@@ -573,15 +684,15 @@ function TabList({ mode, watchlist }) {
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <div style={{ width: 6, height: 6, borderRadius: 3, background: stock.color, flexShrink: 0 }} />
                 <div style={{ minWidth: 52 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>{stock.name}</div>
-                  <div style={{ fontSize: 10, color: "#555" }}>{stock.id}</div>
+                  <div style={{ fontSize: 17, fontWeight: 700 }}>{stock.name}</div>
+                  <div style={{ fontSize: 14, color: "#bbb" }}>{stock.id}</div>
                 </div>
                 <Spark stock={stock} />
                 <div style={{ flex: 1, textAlign: "right" }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: stock.isUp ? "#ef4444" : "#22c55e" }}>{stock.price}</div>
-                  <div style={{ fontSize: 10, color: stock.isUp ? "#ef4444" : "#22c55e" }}>{stock.isUp ? "+" : ""}{stock.pct}%</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: stock.isUp ? "#ef4444" : "#22c55e" }}>{stock.price}</div>
+                  <div style={{ fontSize: 14, color: stock.isUp ? "#ef4444" : "#22c55e" }}>{stock.isUp ? "+" : ""}{stock.pct}%</div>
                 </div>
-                <div style={{ padding: "3px 8px", borderRadius: 6, fontSize: 10, fontWeight: 600, background: stock.color + "15", color: stock.color, whiteSpace: "nowrap" }}>{stock.signal}</div>
+                <div style={{ padding: "3px 8px", borderRadius: 6, fontSize: 14, fontWeight: 600, background: stock.color + "15", color: stock.color, whiteSpace: "nowrap" }}>{stock.signal}</div>
               </div>
               {open && (
                 <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #1e1e1e" }} onClick={e => e.stopPropagation()}>
@@ -593,21 +704,21 @@ function TabList({ mode, watchlist }) {
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 4, marginBottom: 10 }}>
                     {[["外資", stock.foreignBuy], ["投信", stock.trustBuy], ["自營", stock.dealerBuy], ["合計", ti]].map(([l, v]) => (
                       <div key={l} style={{ background: "#0a0a0a", borderRadius: 6, padding: "5px 6px", textAlign: "center" }}>
-                        <div style={{ fontSize: 9, color: "#555" }}>{l}</div>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: v > 0 ? "#ef4444" : v < 0 ? "#22c55e" : "#666" }}>{v > 0 ? "+" : ""}{(v / 1000).toFixed(1)}k</div>
+                        <div style={{ fontSize: 13, color: "#bbb" }}>{l}</div>
+                        <div style={{ fontSize: 15, fontWeight: 600, color: v > 0 ? "#ef4444" : v < 0 ? "#22c55e" : "#666" }}>{v > 0 ? "+" : ""}{(v / 1000).toFixed(1)}k</div>
                       </div>
                     ))}
                   </div>
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                    {stock.reasons.map((r, i) => <span key={i} style={{ padding: "2px 6px", borderRadius: 6, fontSize: 9, background: "#141414", color: "#777", border: "1px solid #1e1e1e" }}>{r}</span>)}
+                    {stock.reasons.map((r, i) => <span key={i} style={{ padding: "2px 6px", borderRadius: 6, fontSize: 13, background: "#141414", color: "#ccc", border: "1px solid #1e1e1e" }}>{r}</span>)}
                   </div>
                   <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
                     <button onClick={() => watchlist.add({ id: stock.id, name: stock.name, verdict: stock.signal })}
                       disabled={watchlist.has(stock.id)}
-                      style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #333", background: "#141414", color: watchlist.has(stock.id) ? "#555" : "#f59e0b", fontSize: 10, cursor: "pointer" }}>
+                      style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #333", background: "#141414", color: watchlist.has(stock.id) ? "#555" : "#f59e0b", fontSize: 14, cursor: "pointer" }}>
                       {watchlist.has(stock.id) ? "✓ 已追蹤" : "⭐ 加入自選"}
                     </button>
-                    <span style={{ fontSize: 10, color: "#333", lineHeight: "24px" }}>量 {stock.volume.toLocaleString()} 張 · {stock.sector}</span>
+                    <span style={{ fontSize: 14, color: "#999", lineHeight: "24px" }}>量 {stock.volume.toLocaleString()} 張 · {stock.sector}</span>
                   </div>
                 </div>
               )}
@@ -624,8 +735,10 @@ function TabList({ mode, watchlist }) {
 // ====================================
 export default function App() {
   const [tab, setTab] = useState("search");
+  const [showSettings, setShowSettings] = useState(false);
   const [now] = useState(new Date());
   const watchlist = useWatchlist();
+  const apiKey = useApiKey();
 
   const enriched = STOCKS.map(s => ({ ...s, ...getSignal(s) }));
   const buyCount = enriched.filter(s => s.score >= 0).length;
@@ -638,10 +751,16 @@ export default function App() {
       <div style={{ borderBottom: "1px solid #1a1a1a", padding: "16px 16px 12px" }}>
         <div style={{ maxWidth: 640, margin: "0 auto" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 2 }}>
-            <span style={{ fontSize: 22, fontWeight: 800, letterSpacing: -1, background: "linear-gradient(90deg, #ef4444, #f97316)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>台股雷達</span>
-            <span style={{ fontSize: 10, color: "#444" }}>v3.0</span>
+            <span style={{ fontSize: 28, fontWeight: 800, letterSpacing: -1, background: "linear-gradient(90deg, #ef4444, #f97316)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>台股雷達</span>
+            <span style={{ fontSize: 14, color: "#aaa" }}>v3.0</span>
+            <div style={{ marginLeft: "auto" }}>
+              <button onClick={() => setShowSettings(!showSettings)}
+                style={{ background: apiKey.hasKey ? "#1a1a1a" : "#2a1510", border: `1px solid ${apiKey.hasKey ? "#333" : "#f59e0b"}`, borderRadius: 8, padding: "6px 12px", color: apiKey.hasKey ? "#ccc" : "#f59e0b", fontSize: 14, cursor: "pointer" }}>
+                ⚙️ {apiKey.hasKey ? "已設定" : "設定 API Key"}
+              </button>
+            </div>
           </div>
-          <div style={{ fontSize: 10, color: "#444" }}>{now.toLocaleDateString("zh-TW", { year: "numeric", month: "long", day: "numeric", weekday: "long" })} · AI 全面診斷</div>
+          <div style={{ fontSize: 14, color: "#aaa" }}>{now.toLocaleDateString("zh-TW", { year: "numeric", month: "long", day: "numeric", weekday: "long" })} · AI 全面診斷</div>
         </div>
       </div>
 
@@ -655,9 +774,9 @@ export default function App() {
             { label: "自選股", val: `${watchlist.list.length}`, sub: "追蹤中", col: "#f59e0b" },
           ].map((c, i) => (
             <div key={i} style={{ background: "#111", borderRadius: 8, padding: "7px 8px", border: "1px solid #1a1a1a" }}>
-              <div style={{ fontSize: 8, color: "#555" }}>{c.label}</div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: c.col }}>{c.val}</div>
-              <div style={{ fontSize: 9, color: "#555" }}>{c.sub}</div>
+              <div style={{ fontSize: 12, color: "#bbb" }}>{c.label}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: c.col }}>{c.val}</div>
+              <div style={{ fontSize: 13, color: "#bbb" }}>{c.sub}</div>
             </div>
           ))}
         </div>
@@ -671,7 +790,7 @@ export default function App() {
             { key: "sell", icon: "📉", label: "賣出" },
           ].map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
-              style={{ flex: 1, padding: "7px 2px", borderRadius: 7, border: "none", cursor: "pointer", fontSize: 11, fontWeight: tab === t.key ? 600 : 400, transition: "all 0.2s",
+              style={{ flex: 1, padding: "7px 2px", borderRadius: 7, border: "none", cursor: "pointer", fontSize: 15, fontWeight: tab === t.key ? 600 : 400, transition: "all 0.2s",
                 background: tab === t.key ? "#1f1f1f" : "transparent",
                 color: tab === t.key ? (t.key === "sell" ? "#22c55e" : t.key === "buy" ? "#ef4444" : t.key === "watchlist" ? "#f59e0b" : "#f97316") : "#555" }}>
               {t.icon} {t.label}
@@ -679,20 +798,23 @@ export default function App() {
           ))}
         </div>
 
+        {/* Settings panel */}
+        {showSettings && <SettingsPanel apiKey={apiKey} onClose={() => setShowSettings(false)} />}
+
         {/* Tab content */}
-        {tab === "search" && <TabDiagnosis watchlist={watchlist} />}
-        {tab === "watchlist" && <TabWatchlist watchlist={watchlist} />}
+        {tab === "search" && <TabDiagnosis watchlist={watchlist} apiKey={apiKey} />}
+        {tab === "watchlist" && <TabWatchlist watchlist={watchlist} apiKey={apiKey} />}
         {tab === "buy" && <TabList mode="buy" watchlist={watchlist} />}
         {tab === "sell" && <TabList mode="sell" watchlist={watchlist} />}
 
         {/* Footer */}
         <div style={{ marginTop: 20, padding: 12, background: "#0d0d0d", borderRadius: 10, border: "1px solid #151515" }}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: "#444", marginBottom: 4 }}>📐 分析方法</div>
-          <div style={{ fontSize: 9, color: "#333", lineHeight: 1.7 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#aaa", marginBottom: 4 }}>📐 分析方法</div>
+          <div style={{ fontSize: 13, color: "#999", lineHeight: 1.7 }}>
             六維綜合評分（KD/RSI/MACD/均線/法人/估值）＋ AI 即時財報健檢（營收成長/EPS/毛利率/ROE/負債比）＋ 即時新聞 AI 解讀利多利空。自選股追蹤儲存於瀏覽器。所有內容僅供參考，不構成投資建議。
           </div>
         </div>
-        <div style={{ marginTop: 10, textAlign: "center", fontSize: 9, color: "#222" }}>台股雷達 v3.0 © 2026</div>
+        <div style={{ marginTop: 10, textAlign: "center", fontSize: 13, color: "#777" }}>台股雷達 v3.0 © 2026</div>
       </div>
     </div>
   );
