@@ -679,40 +679,54 @@ function TabScan({ mode, watchlist, apiKey }) {
 
   const scan = async () => {
     if (!apiKey.hasKey) return;
-    setLoading(true); setProgress("正在掃描熱門股…");
+    setLoading(true); setProgress("");
     try {
-      const text = await callAI(`你是台股分析師。請搜尋以下 16 檔台股的「今日最新收盤價」和「漲跌幅」，並給出買賣判定。
+      const text = await callAI(`你是台股分析師。請搜尋以下台股的今日最新收盤價，並給出買賣判定。
 
-股票清單：${SCAN_STOCKS.join("、")}
+股票：${SCAN_STOCKS.join("、")}
 
-請嚴格用以下 JSON 格式回答，不要加任何其他文字，只回傳 JSON：
-[
-  {"id":"2330","name":"台積電","price":1234,"change":"+1.5%","verdict":"買進","reason":"站穩均線之上，外資連續買超","sector":"半導體"},
-  ...
-]
+請用以下格式回答每一檔股票（一行一檔，用 | 分隔）：
+代號|名稱|收盤價|漲跌幅|判定|理由|產業
 
-verdict 只能是以下五種之一：強力買進、買進、觀望、賣出、強力賣出
-reason 用一句話說明理由
-sector 填寫產業類別
+範例：
+2330|台積電|1050|+2.3%|買進|外資連買三天，站穩所有均線|半導體
+2317|鴻海|235|-0.5%|觀望|量縮整理，等待方向|電子代工
 
-重要：一定要回傳完整 16 檔的 JSON 陣列。`, apiKey.key, apiKey.provider);
+判定只能填：強力買進、買進、觀望、賣出、強力賣出（五選一）
+請回覆全部 16 檔，每檔一行。`, apiKey.key, apiKey.provider);
 
-      // Parse JSON from response
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
+      // Parse text lines
+      const lines = text.split("\n").filter(l => l.includes("|") && /\d{4}/.test(l));
+      const parsed = [];
+      for (const line of lines) {
+        const parts = line.replace(/^\||\|$/g, "").split("|").map(s => s.trim());
+        if (parts.length >= 5) {
+          parsed.push({
+            id: parts[0].replace(/[^0-9]/g, "").substring(0, 4),
+            name: parts[1],
+            price: parts[2],
+            change: parts[3],
+            verdict: parts[4],
+            reason: parts[5] || "",
+            sector: parts[6] || "",
+          });
+        }
+      }
+      if (parsed.length > 0) {
         setStocks(parsed);
         localStorage.setItem("tw-stock-scan", JSON.stringify(parsed));
         const timeStr = new Date().toLocaleString("zh-TW");
         setLastScan(timeStr);
         localStorage.setItem("tw-stock-scan-time", timeStr);
+      } else {
+        setProgress("AI 回傳格式異常，請重新掃描");
       }
     } catch (e) {
       setProgress("掃描失敗：" + e.message);
       setLoading(false);
       return;
     }
-    setLoading(false); setProgress("");
+    setLoading(false);
   };
 
   const verdictColors = { "強力買進": "#dc2626", "買進": "#ef4444", "觀望": "#f59e0b", "賣出": "#22c55e", "強力賣出": "#16a34a" };
