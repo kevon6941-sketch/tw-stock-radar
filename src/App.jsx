@@ -190,35 +190,38 @@ function useApiKey() {
     try { return localStorage.getItem("tw-stock-apikey") || ""; }
     catch { return ""; }
   });
+  const [provider, setProviderState] = useState(() => {
+    try { return localStorage.getItem("tw-stock-provider") || "gemini"; }
+    catch { return "gemini"; }
+  });
   const save = (k) => { setKey(k); localStorage.setItem("tw-stock-apikey", k); };
   const clear = () => { setKey(""); localStorage.removeItem("tw-stock-apikey"); };
-  return { key, save, clear, hasKey: key.length > 10 };
+  const setProvider = (p) => { setProviderState(p); localStorage.setItem("tw-stock-provider", p); };
+  return { key, save, clear, hasKey: key.length > 10, provider, setProvider };
 }
 
-// --- API call helper ---
-async function callAI(prompt, apiKey) {
+// --- API call helper (Gemini FREE / Anthropic PAID) ---
+async function callAI(prompt, apiKey, provider) {
   if (!apiKey) throw new Error("NO_KEY");
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1000,
-      tools: [{ type: "web_search_20250305", name: "web_search" }],
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `API 錯誤 ${resp.status}`);
+  if (provider === "anthropic") {
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1000, tools: [{ type: "web_search_20250305", name: "web_search" }], messages: [{ role: "user", content: prompt }] }),
+    });
+    if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err?.error?.message || "API error " + resp.status); }
+    const data = await resp.json();
+    return data.content?.filter(i => i.type === "text").map(i => i.text).join("\n") || "";
+  } else {
+    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], tools: [{ google_search: {} }] }),
+    });
+    if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err?.error?.message || "API error " + resp.status); }
+    const data = await resp.json();
+    return (data?.candidates?.[0]?.content?.parts || []).map(p => p.text || "").join("\n");
   }
-  const data = await resp.json();
-  return data.content?.filter(i => i.type === "text").map(i => i.text).join("\n") || "";
 }
 
 // --- Settings Panel ---
@@ -230,11 +233,11 @@ function SettingsPanel({ apiKey, onClose }) {
   const testKey = async () => {
     setTesting(true); setTestResult(null);
     try {
-      await callAI("回答：連線成功", input);
-      setTestResult({ ok: true, msg: "✅ API Key 驗證成功！" });
+      await callAI("回答兩個字：成功", input, apiKey.provider);
+      setTestResult({ ok: true, msg: "✅ 驗證成功！可以開始使用 AI 診斷了。" });
       apiKey.save(input);
     } catch (e) {
-      setTestResult({ ok: false, msg: `❌ 驗證失敗：${e.message}` });
+      setTestResult({ ok: false, msg: "❌ 驗證失敗：" + e.message });
     }
     setTesting(false);
   };
@@ -242,52 +245,67 @@ function SettingsPanel({ apiKey, onClose }) {
   return (
     <div style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 12, padding: 20, marginBottom: 14 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-        <div style={{ fontSize: 18, fontWeight: 700 }}>⚙️ API 設定</div>
-        <button onClick={onClose} style={{ background: "none", border: "none", color: "#999", fontSize: 20, cursor: "pointer" }}>✕</button>
+        <div style={{ fontSize: 20, fontWeight: 700 }}>⚙️ API 設定</div>
+        <button onClick={onClose} style={{ background: "none", border: "none", color: "#ccc", fontSize: 22, cursor: "pointer" }}>✕</button>
       </div>
 
-      <div style={{ fontSize: 14, color: "#ccc", marginBottom: 12, lineHeight: 1.8 }}>
-        AI 診斷功能需要 Anthropic API Key 才能使用。
-        你的 Key 只會存在瀏覽器本機，不會上傳到任何伺服器。
+      <div style={{ fontSize: 15, color: "#ccc", marginBottom: 8 }}>選擇 AI 引擎</div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        {[
+          { id: "gemini", name: "Google Gemini", tag: "🆓 免費", desc: "每天可用 500 次" },
+          { id: "anthropic", name: "Anthropic Claude", tag: "💰 付費", desc: "需儲值 $5 美金起" },
+        ].map(p => (
+          <button key={p.id} onClick={() => { apiKey.setProvider(p.id); setInput(""); setTestResult(null); }}
+            style={{ flex: 1, padding: "14px 12px", borderRadius: 10, border: "2px solid " + (apiKey.provider === p.id ? "#f97316" : "#222"),
+              background: apiKey.provider === p.id ? "#1a1510" : "#0d0d0d", cursor: "pointer", textAlign: "left" }}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: apiKey.provider === p.id ? "#f97316" : "#999" }}>{p.name}</div>
+            <div style={{ fontSize: 14, color: apiKey.provider === p.id ? "#22c55e" : "#777", marginTop: 3 }}>{p.tag}</div>
+            <div style={{ fontSize: 13, color: "#aaa", marginTop: 2 }}>{p.desc}</div>
+          </button>
+        ))}
       </div>
 
-      <div style={{ fontSize: 14, color: "#bbb", marginBottom: 6 }}>API Key</div>
-      <input
-        value={input}
-        onChange={e => setInput(e.target.value)}
-        placeholder="sk-ant-api03-..."
+      <div style={{ fontSize: 15, color: "#ccc", marginBottom: 6 }}>API Key</div>
+      <input value={input} onChange={e => setInput(e.target.value)}
+        placeholder={apiKey.provider === "gemini" ? "AIzaSy..." : "sk-ant-api03-..."}
         type="password"
-        style={{ width: "100%", background: "#0a0a0a", border: "1px solid #333", borderRadius: 8, padding: "12px 14px", color: "#e5e5e5", fontSize: 15, outline: "none", marginBottom: 10, boxSizing: "border-box" }}
-      />
+        style={{ width: "100%", background: "#0a0a0a", border: "1px solid #333", borderRadius: 8, padding: "12px 14px", color: "#e5e5e5", fontSize: 16, outline: "none", marginBottom: 10, boxSizing: "border-box" }} />
 
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
         <button onClick={testKey} disabled={testing || !input.trim()}
-          style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: "none", background: "linear-gradient(135deg, #ef4444, #f97316)", color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer" }}>
+          style={{ flex: 1, padding: "12px 0", borderRadius: 8, border: "none", background: testing || !input.trim() ? "#333" : "linear-gradient(135deg, #ef4444, #f97316)", color: "#fff", fontSize: 16, fontWeight: 600, cursor: testing ? "wait" : "pointer" }}>
           {testing ? "驗證中…" : "儲存並驗證"}
         </button>
         {apiKey.hasKey && (
-          <button onClick={() => { apiKey.clear(); setInput("", apiKey.key); setTestResult(null); }}
-            style={{ padding: "10px 16px", borderRadius: 8, border: "1px solid #333", background: "#1a1a1a", color: "#ef4444", fontSize: 14, cursor: "pointer" }}>
-            清除
-          </button>
+          <button onClick={() => { apiKey.clear(); setInput(""); setTestResult(null); }}
+            style={{ padding: "12px 16px", borderRadius: 8, border: "1px solid #333", background: "#1a1a1a", color: "#ef4444", fontSize: 15, cursor: "pointer" }}>清除</button>
         )}
       </div>
 
       {testResult && (
-        <div style={{ padding: 10, borderRadius: 8, fontSize: 14, background: testResult.ok ? "#052e16" : "#2a1515", color: testResult.ok ? "#86efac" : "#fca5a5", border: `1px solid ${testResult.ok ? "#16a34a" : "#dc2626"}` }}>
+        <div style={{ padding: 12, borderRadius: 8, fontSize: 15, background: testResult.ok ? "#052e16" : "#2a1515", color: testResult.ok ? "#86efac" : "#fca5a5", border: "1px solid " + (testResult.ok ? "#16a34a" : "#dc2626") }}>
           {testResult.msg}
         </div>
       )}
 
-      <div style={{ marginTop: 14, padding: 12, background: "#0a0a0a", borderRadius: 8, fontSize: 13, color: "#999", lineHeight: 1.8 }}>
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>如何取得 API Key？</div>
-        1. 到 <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style={{ color: "#f97316" }}>console.anthropic.com</a> 登入<br/>
-        2. 點選「Create Key」建立一組新的 Key<br/>
-        3. 複製貼到上方欄位即可
+      <div style={{ marginTop: 14, padding: 14, background: "#0a0a0a", borderRadius: 8, fontSize: 14, color: "#bbb", lineHeight: 2 }}>
+        {apiKey.provider === "gemini" ? (<>
+          <div style={{ fontWeight: 600, marginBottom: 4, color: "#22c55e", fontSize: 15 }}>🆓 免費取得 Gemini API Key</div>
+          1. 到 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style={{ color: "#f97316" }}>aistudio.google.com/apikey</a> 用 Google 帳號登入<br/>
+          2. 點「建立 API 金鑰」→ 選一個專案<br/>
+          3. 複製金鑰（AIzaSy... 開頭）貼到上方<br/>
+          <strong style={{ color: "#22c55e" }}>✨ 完全免費，不需信用卡！</strong>
+        </>) : (<>
+          <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 15 }}>取得 Anthropic API Key</div>
+          1. 到 <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style={{ color: "#f97316" }}>console.anthropic.com</a> 登入<br/>
+          2. 建立 Key → Plans & Billing 加值 $5 起<br/>
+          3. 複製金鑰貼到上方
+        </>)}
       </div>
     </div>
   );
 }
+
 
 // ====================================
 // TAB 1: AI 個股診斷 + 財報健檢
@@ -328,7 +346,7 @@ function TabDiagnosis({ watchlist, apiKey }) {
 💪 信心度：[高/中/低]
 📝 一句話理由：[為什麼應該買或賣]
 🎯 建議策略：[具體操作，例如「分批買進，停損設在XX元」]
-⚠️ 最大風險：[主要風險]`, apiKey.key);
+⚠️ 最大風險：[主要風險]`, apiKey.key, apiKey.provider);
 
       // Step 2: Financial report
       setStep("分析財報數據…");
@@ -358,7 +376,7 @@ function TabDiagnosis({ watchlist, apiKey }) {
    - 負債比率：[數據]%
    - 流動比率：[數據]%
 
-📋 財報總評：[用2句話總結這家公司的財務狀況，是否值得投資]`, apiKey.key);
+📋 財報總評：[用2句話總結這家公司的財務狀況，是否值得投資]`, apiKey.key, apiKey.provider);
 
       // Step 3: News
       setStep("搜尋最新相關新聞…");
@@ -376,7 +394,7 @@ function TabDiagnosis({ watchlist, apiKey }) {
 
 （列出 3-5 則）
 
-📊 新聞面總評：整體偏[利多/利空/中性]，[1句話說明]`, apiKey.key);
+📊 新聞面總評：整體偏[利多/利空/中性]，[1句話說明]`, apiKey.key, apiKey.provider);
 
       const verdict = parseVerdict(techText);
       const info = parseStockInfo(techText);
@@ -550,7 +568,7 @@ function TabWatchlist({ watchlist, apiKey }) {
 用以下格式簡短回答（繁體中文）：
 💰 [股價] 元（[漲跌幅%]）
 🎯 判定：【買進/賣出/觀望】
-📝 [一句話理由]`, apiKey.key);
+📝 [一句話理由]`, apiKey.key, apiKey.provider);
       const verdict = parseVerdict(text);
       watchlist.update(item.id, { latestInfo: text, verdict, lastRefresh: new Date().toISOString() });
     } catch {}
