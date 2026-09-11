@@ -213,13 +213,35 @@ async function callAI(prompt, apiKey, provider) {
     const data = await resp.json();
     return data.content?.filter(i => i.type === "text").map(i => i.text).join("\n") || "";
   } else {
-    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], tools: [{ google_search: {} }] }),
-    });
-    if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err?.error?.message || "API error " + resp.status); }
-    const data = await resp.json();
+    // Gemini API - try with google_search, fallback without
+    const makeRequest = async (useSearch) => {
+      const body = { contents: [{ parts: [{ text: prompt }] }] };
+      if (useSearch) body.tools = [{ google_search: {} }];
+      const resp = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+          body: JSON.stringify(body),
+        }
+      );
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err?.error?.message || "API error " + resp.status);
+      }
+      return resp.json();
+    };
+    let data;
+    try {
+      data = await makeRequest(true);
+    } catch (e) {
+      // If google_search not available on free tier, retry without
+      if (e.message.includes("400") || e.message.includes("google_search") || e.message.includes("tool")) {
+        data = await makeRequest(false);
+      } else {
+        throw e;
+      }
+    }
     return (data?.candidates?.[0]?.content?.parts || []).map(p => p.text || "").join("\n");
   }
 }
