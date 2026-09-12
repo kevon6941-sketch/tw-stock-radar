@@ -537,60 +537,79 @@ function analyzeTechnical(data) {
 
   let score = 0;
   const signals = [];
+  const detail = [];
+  const add = (pts, label, note) => {
+    score += pts;
+    if (pts !== 0) { signals.push(label); detail.push({ pts, label, note }); }
+  };
 
   // 1. 均線多空排列（權重最高）
   if (ma5 && ma10 && ma20) {
-    if (ma5 > ma10 && ma10 > ma20) { score += 2.5; signals.push("均線多頭排列"); }
-    else if (ma5 < ma10 && ma10 < ma20) { score -= 2.5; signals.push("均線空頭排列"); }
-    if (close > ma20) { score += 1; signals.push("站上月線"); }
-    else { score -= 1; signals.push("跌破月線"); }
-    // 乖離過大警示（追高風險）
+    if (ma5 > ma10 && ma10 > ma20)
+      add(2.5, "均線多頭排列", `5MA ${ma5.toFixed(1)} > 10MA ${ma10.toFixed(1)} > 20MA ${ma20.toFixed(1)}，短中期趨勢向上`);
+    else if (ma5 < ma10 && ma10 < ma20)
+      add(-2.5, "均線空頭排列", `5MA ${ma5.toFixed(1)} < 10MA ${ma10.toFixed(1)} < 20MA ${ma20.toFixed(1)}，趨勢向下`);
+
+    if (close > ma20) add(1, "站上月線", `收盤 ${close} 高於 20MA ${ma20.toFixed(1)}，中期偏多`);
+    else add(-1, "跌破月線", `收盤 ${close} 低於 20MA ${ma20.toFixed(1)}，中期轉弱`);
+
     const bias = ((close - ma20) / ma20) * 100;
-    if (bias > 15) { score -= 1.5; signals.push("正乖離過大"); }
-    else if (bias < -15) { score += 1; signals.push("負乖離大可能反彈"); }
+    if (bias > 15) add(-1.5, "正乖離過大", `離月線 +${bias.toFixed(1)}%，短線漲多有回檔風險`);
+    else if (bias < -15) add(1, "負乖離大", `離月線 ${bias.toFixed(1)}%，跌深可能反彈`);
   }
 
   // 2. KD
   if (kd) {
-    if (kd.k < 20 && kd.k > kd.d) { score += 2; signals.push("KD低檔黃金交叉"); }
-    else if (kd.k > 80 && kd.k < kd.d) { score -= 2; signals.push("KD高檔死亡交叉"); }
-    else if (kd.k > kd.d && kd.k < 70) { score += 1; signals.push("KD黃金交叉"); }
-    else if (kd.k < kd.d && kd.k > 30) { score -= 1; signals.push("KD死亡交叉"); }
-    if (kd.k > 85) { score -= 1; signals.push("KD超買"); }
-    if (kd.k < 15) { score += 1; signals.push("KD超賣"); }
+    if (kd.k < 20 && kd.k > kd.d)
+      add(2, "KD低檔黃金交叉", `K ${kd.k.toFixed(0)} 在低檔向上穿越 D ${kd.d.toFixed(0)}，落底轉強訊號`);
+    else if (kd.k > 80 && kd.k < kd.d)
+      add(-2, "KD高檔死亡交叉", `K ${kd.k.toFixed(0)} 在高檔向下跌破 D ${kd.d.toFixed(0)}，見頂訊號`);
+    else if (kd.k > kd.d && kd.k < 70)
+      add(1, "KD黃金交叉", `K ${kd.k.toFixed(0)} 高於 D ${kd.d.toFixed(0)}，動能轉強`);
+    else if (kd.k < kd.d && kd.k > 30)
+      add(-1, "KD死亡交叉", `K ${kd.k.toFixed(0)} 低於 D ${kd.d.toFixed(0)}，動能轉弱`);
+
+    if (kd.k > 85) add(-1, "KD超買", `K 值 ${kd.k.toFixed(0)} 過高，短線過熱`);
+    if (kd.k < 15) add(1, "KD超賣", `K 值 ${kd.k.toFixed(0)} 過低，接近超賣區`);
   }
 
   // 3. RSI
   if (rsi !== null) {
-    if (rsi > 75) { score -= 1.5; signals.push("RSI過熱"); }
-    else if (rsi < 25) { score += 1.5; signals.push("RSI超賣"); }
-    else if (rsi > 55) { score += 0.5; signals.push("RSI偏強"); }
-    else if (rsi < 45) { score -= 0.5; signals.push("RSI偏弱"); }
+    if (rsi > 75) add(-1.5, "RSI過熱", `RSI ${rsi.toFixed(0)}（>70 為超買），追高風險提高`);
+    else if (rsi < 25) add(1.5, "RSI超賣", `RSI ${rsi.toFixed(0)}（<30 為超賣），有反彈機會`);
+    else if (rsi > 55) add(0.5, "RSI偏強", `RSI ${rsi.toFixed(0)}，多方稍佔優勢`);
+    else if (rsi < 45) add(-0.5, "RSI偏弱", `RSI ${rsi.toFixed(0)}，空方稍佔優勢`);
   }
 
   // 4. MACD
   if (macd) {
-    if (macd.osc > 0 && macd.dif > 0) { score += 1.5; signals.push("MACD多方"); }
-    else if (macd.osc < 0 && macd.dif < 0) { score -= 1.5; signals.push("MACD空方"); }
-    else if (macd.osc > 0) { score += 0.5; signals.push("MACD轉強"); }
-    else { score -= 0.5; signals.push("MACD轉弱"); }
+    if (macd.osc > 0 && macd.dif > 0)
+      add(1.5, "MACD多方", `柱狀體 +${macd.osc.toFixed(2)} 且 DIF 為正，中期動能偏多`);
+    else if (macd.osc < 0 && macd.dif < 0)
+      add(-1.5, "MACD空方", `柱狀體 ${macd.osc.toFixed(2)} 且 DIF 為負，中期動能偏空`);
+    else if (macd.osc > 0) add(0.5, "MACD轉強", `柱狀體翻正 +${macd.osc.toFixed(2)}`);
+    else add(-0.5, "MACD轉弱", `柱狀體翻負 ${macd.osc.toFixed(2)}`);
   }
 
   // 5. 量價關係
   const avgVol = data.slice(-20).reduce((s, d) => s + d.volume, 0) / 20;
   const volRatio = avgVol > 0 ? last.volume / avgVol : 1;
   const priceUp = close > prev.close;
-  if (volRatio > 1.8 && priceUp) { score += 1.5; signals.push("帶量上攻"); }
-  else if (volRatio > 1.8 && !priceUp) { score -= 1.5; signals.push("爆量下殺"); }
-  else if (volRatio < 0.6 && !priceUp) { score += 0.5; signals.push("量縮止跌"); }
-  else if (volRatio < 0.6 && priceUp) { score -= 0.5; signals.push("量縮上漲乏力"); }
+  if (volRatio > 1.8 && priceUp)
+    add(1.5, "帶量上攻", `成交量是 20 日均量的 ${volRatio.toFixed(1)} 倍且上漲，有資金進場`);
+  else if (volRatio > 1.8 && !priceUp)
+    add(-1.5, "爆量下殺", `成交量 ${volRatio.toFixed(1)} 倍但下跌，疑似出貨`);
+  else if (volRatio < 0.6 && !priceUp)
+    add(0.5, "量縮止跌", `量縮至 ${volRatio.toFixed(1)} 倍，賣壓減輕`);
+  else if (volRatio < 0.6 && priceUp)
+    add(-0.5, "量縮上漲乏力", `上漲但量縮至 ${volRatio.toFixed(1)} 倍，追價意願低`);
 
   // 6. 近月相對位置
   const monthHigh = Math.max(...data.slice(-20).map(d => d.high));
   const monthLow = Math.min(...data.slice(-20).map(d => d.low));
   const posInRange = monthHigh > monthLow ? (close - monthLow) / (monthHigh - monthLow) : 0.5;
-  if (posInRange > 0.95) { score += 0.5; signals.push("創月新高"); }
-  else if (posInRange < 0.05) { score -= 0.5; signals.push("創月新低"); }
+  if (posInRange > 0.95) add(0.5, "創月新高", `突破近 20 日高點 ${monthHigh.toFixed(1)}`);
+  else if (posInRange < 0.05) add(-0.5, "創月新低", `跌破近 20 日低點 ${monthLow.toFixed(1)}`);
 
   let verdict;
   if (score >= 6) verdict = "強力買進";
@@ -600,56 +619,147 @@ function analyzeTechnical(data) {
   else verdict = "強力賣出";
 
   return {
-    verdict, score,
+    verdict, score, detail, mode: "deep",
     reason: signals.slice(0, 4).join("、"),
     indicators: { ma5, ma10, ma20, rsi, k: kd?.k, d: kd?.d, macd: macd?.osc, volRatio },
   };
+}
+
+// --- 評分明細說明 ---
+function ScoreBreakdown({ detail, score, verdict, mode }) {
+  if (!detail || detail.length === 0) return null;
+
+  const thresholds = mode === "deep"
+    ? [["強力買進", 6], ["買進", 2.5], ["觀望", -2.5], ["賣出", -6]]
+    : [["強力買進", 5], ["買進", 2.5], ["觀望", -2.5], ["賣出", -5]];
+
+  const vc = { "強力買進": "#dc2626", "買進": "#ef4444", "觀望": "#f59e0b", "賣出": "#22c55e", "強力賣出": "#16a34a" }[verdict] || "#888";
+  const plus = detail.filter(d => d.pts > 0);
+  const minus = detail.filter(d => d.pts < 0);
+
+  return (
+    <div style={{ background: "#0a0a0a", borderRadius: 8, padding: 12, marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <span style={{ fontSize: 14, color: "#ccc", fontWeight: 600 }}>
+          為什麼判定「{verdict}」
+        </span>
+        <span style={{ fontSize: 13, color: "#888" }}>
+          {mode === "deep" ? "深度分析" : "當日快篩"}
+        </span>
+      </div>
+
+      {/* 明細條列 */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 10 }}>
+        {[...plus, ...minus].map((d, i) => (
+          <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <span style={{
+              minWidth: 42, textAlign: "center", padding: "2px 0", borderRadius: 5,
+              fontSize: 13, fontWeight: 700,
+              background: d.pts > 0 ? "#2a1515" : "#0d1f0d",
+              color: d.pts > 0 ? "#ef4444" : "#22c55e",
+            }}>
+              {d.pts > 0 ? "+" : ""}{d.pts}
+            </span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, color: "#ddd" }}>{d.label}</div>
+              {d.note && <div style={{ fontSize: 12, color: "#999", lineHeight: 1.6, marginTop: 1 }}>{d.note}</div>}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 總分 */}
+      <div style={{ borderTop: "1px solid #1e1e1e", paddingTop: 9 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <span style={{ fontSize: 14, color: "#ccc" }}>總分</span>
+          <span style={{ fontSize: 18, fontWeight: 700, color: vc }}>
+            {score > 0 ? "+" : ""}{score.toFixed(1)}
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: 3 }}>
+          {thresholds.map(([name, min], i) => {
+            const on = verdict === name || (i === thresholds.length - 1 && verdict === "強力賣出" && score <= min);
+            const isCur = verdict === name;
+            return (
+              <div key={name} style={{
+                flex: 1, textAlign: "center", padding: "4px 0", borderRadius: 5, fontSize: 11,
+                background: isCur ? vc + "22" : "#111",
+                color: isCur ? vc : "#777",
+                border: isCur ? `1px solid ${vc}66` : "1px solid #1a1a1a",
+                fontWeight: isCur ? 700 : 400,
+              }}>
+                <div>{name}</div>
+                <div style={{ fontSize: 10, marginTop: 1 }}>≥{min}</div>
+              </div>
+            );
+          })}
+          <div style={{
+            flex: 1, textAlign: "center", padding: "4px 0", borderRadius: 5, fontSize: 11,
+            background: verdict === "強力賣出" ? "#16a34a22" : "#111",
+            color: verdict === "強力賣出" ? "#16a34a" : "#777",
+            border: verdict === "強力賣出" ? "1px solid #16a34a66" : "1px solid #1a1a1a",
+            fontWeight: verdict === "強力賣出" ? 700 : 400,
+          }}>
+            <div>強力賣出</div>
+            <div style={{ fontSize: 10, marginTop: 1 }}>更低</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // --- 用證交所真實數據計算買賣訊號（不需 AI）---
 function calcVerdict(r) {
   let score = 0;
   const reasons = [];
+  const detail = [];   // 每項加減分的明細
   const pct = r.pct ?? 0;
   const range = (r.high && r.low) ? (r.high - r.low) : 0;
-  const pos = range > 0 ? (r.close - r.low) / range : 0.5;  // 收盤在當日區間位置
+  const pos = range > 0 ? (r.close - r.low) / range : 0.5;
+
+  const add = (pts, label, note) => {
+    score += pts;
+    if (pts !== 0) { reasons.push(label); detail.push({ pts, label, note }); }
+  };
 
   // 1. 漲跌幅
-  if (pct >= 5) { score += 2; reasons.push("強勢大漲"); }
-  else if (pct >= 2) { score += 1.5; reasons.push("明顯上漲"); }
-  else if (pct > 0) { score += 0.5; reasons.push("收紅"); }
-  else if (pct <= -5) { score -= 2; reasons.push("重挫"); }
-  else if (pct <= -2) { score -= 1.5; reasons.push("明顯下跌"); }
-  else if (pct < 0) { score -= 0.5; reasons.push("收黑"); }
+  if (pct >= 5) add(2, "強勢大漲", `今日漲 ${pct.toFixed(2)}%，買盤積極`);
+  else if (pct >= 2) add(1.5, "明顯上漲", `今日漲 ${pct.toFixed(2)}%`);
+  else if (pct > 0) add(0.5, "收紅", `今日漲 ${pct.toFixed(2)}%`);
+  else if (pct <= -5) add(-2, "重挫", `今日跌 ${pct.toFixed(2)}%，賣壓沉重`);
+  else if (pct <= -2) add(-1.5, "明顯下跌", `今日跌 ${pct.toFixed(2)}%`);
+  else if (pct < 0) add(-0.5, "收黑", `今日跌 ${pct.toFixed(2)}%`);
 
-  // 2. 收盤位置（收在高檔代表買盤強）
-  if (pos >= 0.8) { score += 1.5; reasons.push("收最高附近"); }
-  else if (pos >= 0.6) { score += 0.5; reasons.push("收盤偏高"); }
-  else if (pos <= 0.2) { score -= 1.5; reasons.push("收最低附近"); }
-  else if (pos <= 0.4) { score -= 0.5; reasons.push("收盤偏低"); }
+  // 2. 收盤位置
+  const posPct = (pos * 100).toFixed(0);
+  if (pos >= 0.8) add(1.5, "收最高附近", `收盤落在當日高低區間第 ${posPct}%，尾盤買盤強`);
+  else if (pos >= 0.6) add(0.5, "收盤偏高", `收盤落在區間第 ${posPct}%`);
+  else if (pos <= 0.2) add(-1.5, "收最低附近", `收盤落在區間第 ${posPct}%，尾盤被殺`);
+  else if (pos <= 0.4) add(-0.5, "收盤偏低", `收盤落在區間第 ${posPct}%`);
 
-  // 3. 開盤 vs 收盤（紅K / 黑K）
+  // 3. K 棒實體
   if (r.open && r.close > r.open) {
     const body = ((r.close - r.open) / r.open) * 100;
-    if (body >= 2) { score += 1; reasons.push("長紅K棒"); }
-    else { score += 0.3; reasons.push("紅K"); }
+    if (body >= 2) add(1, "長紅K棒", `開 ${r.open} 收 ${r.close}，實體 ${body.toFixed(1)}%`);
+    else add(0.3, "紅K", `開低走高，實體 ${body.toFixed(1)}%`);
   } else if (r.open && r.close < r.open) {
     const body = ((r.open - r.close) / r.open) * 100;
-    if (body >= 2) { score -= 1; reasons.push("長黑K棒"); }
-    else { score -= 0.3; reasons.push("黑K"); }
+    if (body >= 2) add(-1, "長黑K棒", `開 ${r.open} 收 ${r.close}，實體 ${body.toFixed(1)}%`);
+    else add(-0.3, "黑K", `開高走低，實體 ${body.toFixed(1)}%`);
   }
 
   // 4. 跳空
   if (r.open && r.close && r.change !== null) {
     const prevClose = r.close - r.change;
-    if (r.low > prevClose) { score += 1; reasons.push("向上跳空"); }
-    else if (r.high < prevClose) { score -= 1; reasons.push("向下跳空"); }
+    if (r.low > prevClose) add(1, "向上跳空", `最低 ${r.low} 仍高於昨收 ${prevClose.toFixed(2)}`);
+    else if (r.high < prevClose) add(-1, "向下跳空", `最高 ${r.high} 仍低於昨收 ${prevClose.toFixed(2)}`);
   }
 
-  // 5. 振幅過大警示
+  // 5. 振幅
   if (range > 0 && r.close > 0) {
     const amp = (range / r.close) * 100;
-    if (amp >= 7) { score -= 0.5; reasons.push("振幅劇烈"); }
+    if (amp >= 7) add(-0.5, "振幅劇烈", `當日振幅 ${amp.toFixed(1)}%，波動風險高`);
   }
 
   let verdict;
@@ -659,7 +769,7 @@ function calcVerdict(r) {
   else if (score > -5) verdict = "賣出";
   else verdict = "強力賣出";
 
-  return { verdict, reason: reasons.slice(0, 3).join("、"), score };
+  return { verdict, reason: reasons.slice(0, 3).join("、"), score, detail, mode: "quick" };
 }
 
 // --- API Key management ---
@@ -1154,6 +1264,8 @@ function TabWatchlist({ watchlist, apiKey, priceMap }) {
         open: p.open, high: p.high, low: p.low, volume: p.volume,
         verdict: v.verdict,
         reason: v.reason,
+        detail: v.detail,
+        score: v.score,
       },
     };
   });
@@ -1246,9 +1358,9 @@ ${ctx}
                   <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #1e1e1e" }} onClick={e => e.stopPropagation()}>
                     {live ? (
                       <>
-                        <div style={{ fontSize: 15, color: "#ccc", lineHeight: 1.8, marginBottom: 10 }}>
-                          {live.reason || "當日無明顯訊號"}
-                        </div>
+                        {live.detail?.length > 0
+                          ? <ScoreBreakdown detail={live.detail} score={live.score} verdict={live.verdict} mode="quick" />
+                          : <div style={{ fontSize: 15, color: "#ccc", lineHeight: 1.8, marginBottom: 10 }}>當日無明顯訊號</div>}
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, marginBottom: 12 }}>
                           {[["開盤", live.open], ["最高", live.high], ["最低", live.low], ["成交量", live.volume ? Math.round(live.volume/1000) + "張" : "—"]].map(([l, v]) => (
                             <div key={l} style={{ background: "#0a0a0a", borderRadius: 6, padding: "7px 4px", textAlign: "center" }}>
@@ -1406,7 +1518,7 @@ function TabRanking({ stocks, watchlist, scanCount, lastScan, scan, scanning }) 
                         </div>
                       ))}
                     </div>
-                    {s.reason && <div style={{ fontSize: 14, color: "#bbb", marginBottom: 8 }}>{s.reason}</div>}
+                    {s.detail?.length > 0 && <ScoreBreakdown detail={s.detail} score={s.score} verdict={s.verdict} mode={s.scoreMode} />}
                     <button onClick={() => watchlist.add({ id: s.id, name: s.name, verdict: s.verdict })}
                       disabled={watchlist.has(s.id)}
                       style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #333", background: "#141414", color: watchlist.has(s.id) ? "#666" : "#f59e0b", fontSize: 14, cursor: "pointer" }}>
@@ -1563,7 +1675,7 @@ function TabScan({ mode, watchlist, scanState }) {
   // 套用深度分析結果（若有）
   const applyDeep = (s) => {
     const d = deepResults[s.id];
-    if (useDeep && d) return { ...s, verdict: d.verdict, score: d.score, reason: d.reason, deep: d };
+    if (useDeep && d) return { ...s, verdict: d.verdict, score: d.score, reason: d.reason, detail: d.detail, scoreMode: "deep", deep: d };
     return s;
   };
 
@@ -1770,9 +1882,7 @@ function TabScan({ mode, watchlist, scanState }) {
                 </div>
                 {open && (
                   <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #1e1e1e" }} onClick={e => e.stopPropagation()}>
-                    <div style={{ fontSize: 15, color: "#ccc", lineHeight: 1.8, marginBottom: 8 }}>
-                      {stock.reason}
-                    </div>
+                    <ScoreBreakdown detail={stock.detail} score={stock.score} verdict={stock.verdict} mode={stock.scoreMode} />
                     {getThemes(stock.id).length > 0 && (
                       <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
                         {getThemes(stock.id).map(t => (
@@ -1972,6 +2082,8 @@ export default function App() {
           verdict: v.verdict,
           reason: v.reason,
           score: v.score,
+          detail: v.detail,
+          scoreMode: "quick",
           sector: "",
           open: r.open, high: r.high, low: r.low, volume: r.volume,
         };
@@ -2000,7 +2112,7 @@ export default function App() {
       // localStorage 有 5MB 上限，存精簡欄位；超量時逐步降量重試
       const compact = scored.map(s => ({
         id: s.id, name: s.name, price: s.price, change: s.change,
-        verdict: s.verdict, reason: s.reason, score: s.score,
+        verdict: s.verdict, reason: s.reason, score: s.score, detail: s.detail,
         open: s.open, high: s.high, low: s.low, volume: s.volume,
       }));
       for (const n of [compact.length, 800, 400, 200]) {
