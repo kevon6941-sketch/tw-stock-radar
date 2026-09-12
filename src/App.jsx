@@ -675,43 +675,61 @@ function TabScan({ mode, watchlist, apiKey }) {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState("");
   const [lastScan, setLastScan] = useState(() => localStorage.getItem("tw-stock-scan-time") || "");
+  const [rawText, setRawText] = useState("");
   const [selected, setSelected] = useState(null);
 
   const scan = async () => {
     if (!apiKey.hasKey) return;
-    setLoading(true); setProgress("");
+    setLoading(true); setProgress(""); setRawText("");
     try {
-      const text = await callAI(`你是台股分析師。請搜尋以下台股的今日最新收盤價，並給出買賣判定。
+      const text = await callAI(`請搜尋以下台股今日最新收盤價，並判斷該買還是該賣。
 
 股票：${SCAN_STOCKS.join("、")}
 
-請用以下格式回答每一檔股票（一行一檔，用 | 分隔）：
-代號|名稱|收盤價|漲跌幅|判定|理由|產業
+輸出規則：每檔股票一行，欄位用半形直線 | 分隔，總共七個欄位，不要加編號、不要加項目符號、不要加表格線、不要有其他說明文字。
 
-範例：
-2330|台積電|1050|+2.3%|買進|外資連買三天，站穩所有均線|半導體
-2317|鴻海|235|-0.5%|觀望|量縮整理，等待方向|電子代工
+格式：代號|名稱|收盤價|漲跌幅|判定|理由|產業
 
-判定只能填：強力買進、買進、觀望、賣出、強力賣出（五選一）
-請回覆全部 16 檔，每檔一行。`, apiKey.key, apiKey.provider);
+範例輸出：
+2330|台積電|1050|+2.3%|買進|外資連買三天站穩均線|半導體
+2317|鴻海|235|-0.5%|觀望|量縮整理等待方向|電子代工
 
-      // Parse text lines
-      const lines = text.split("\n").filter(l => l.includes("|") && /\d{4}/.test(l));
+判定欄位只能填這五種其中一種：強力買進、買進、觀望、賣出、強力賣出
+
+現在請直接輸出 16 行資料：`, apiKey.key, apiKey.provider);
+
+      setRawText(text);
+
+      // Very lenient parsing
       const parsed = [];
-      for (const line of lines) {
-        const parts = line.replace(/^\||\|$/g, "").split("|").map(s => s.trim());
-        if (parts.length >= 5) {
-          parsed.push({
-            id: parts[0].replace(/[^0-9]/g, "").substring(0, 4),
-            name: parts[1],
-            price: parts[2],
-            change: parts[3],
-            verdict: parts[4],
-            reason: parts[5] || "",
-            sector: parts[6] || "",
-          });
+      const lines = text.split("\n");
+      for (let line of lines) {
+        // Strip markdown, bullets, numbering, table borders
+        line = line.replace(/^[\s\-\*\d\.、`>#]+/, "").replace(/^\|/, "").replace(/\|$/, "").trim();
+        if (!line.includes("|")) continue;
+        const parts = line.split("|").map(s => s.replace(/\*\*/g, "").trim());
+        // Need at least code + name + price + verdict-ish
+        if (parts.length < 4) continue;
+        const code = (parts[0].match(/\d{4}/) || [])[0];
+        if (!code) continue;
+        // Find the verdict field (may not be exactly index 4)
+        const verdicts = ["強力買進", "強力賣出", "買進", "賣出", "觀望"];
+        let verdict = "觀望", verdictIdx = -1;
+        for (let i = 0; i < parts.length; i++) {
+          const found = verdicts.find(v => parts[i].includes(v));
+          if (found) { verdict = found; verdictIdx = i; break; }
         }
+        parsed.push({
+          id: code,
+          name: parts[1] || code,
+          price: parts[2] || "—",
+          change: parts[3] || "",
+          verdict,
+          reason: verdictIdx >= 0 ? (parts[verdictIdx + 1] || "") : (parts[5] || ""),
+          sector: verdictIdx >= 0 ? (parts[verdictIdx + 2] || "") : (parts[6] || ""),
+        });
       }
+
       if (parsed.length > 0) {
         setStocks(parsed);
         localStorage.setItem("tw-stock-scan", JSON.stringify(parsed));
@@ -719,7 +737,7 @@ function TabScan({ mode, watchlist, apiKey }) {
         setLastScan(timeStr);
         localStorage.setItem("tw-stock-scan-time", timeStr);
       } else {
-        setProgress("AI 回傳格式異常，請重新掃描");
+        setProgress("解析失敗，下方是 AI 的原始回覆");
       }
     } catch (e) {
       setProgress("掃描失敗：" + e.message);
@@ -781,8 +799,15 @@ function TabScan({ mode, watchlist, apiKey }) {
 
       {/* Error */}
       {progress && !loading && (
-        <div style={{ padding: 12, background: "#2a1515", borderRadius: 8, fontSize: 14, color: "#fca5a5", marginBottom: 10 }}>
-          ❌ {progress}
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ padding: 12, background: "#2a1515", borderRadius: 8, fontSize: 14, color: "#fca5a5" }}>
+            ❌ {progress}
+          </div>
+          {rawText && (
+            <div style={{ marginTop: 8, padding: 12, background: "#0a0a0a", borderRadius: 8, fontSize: 12, color: "#999", whiteSpace: "pre-wrap", maxHeight: 300, overflowY: "auto", border: "1px solid #222" }}>
+              {rawText}
+            </div>
+          )}
         </div>
       )}
 
