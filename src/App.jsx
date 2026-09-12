@@ -624,12 +624,12 @@ function TabScan({ mode, watchlist, apiKey }) {
       // Very lenient parsing
       const parsed = [];
       const lines = text.split("\n");
-      for (let line of lines) {
-        // Strip markdown, bullets, numbering, table borders
-        line = line.replace(/^[\s\-\*\d\.、`>#]+/, "").replace(/^\|/, "").replace(/\|$/, "").trim();
+      for (let rawLine of lines) {
+        let line = rawLine.trim();
         if (!line.includes("|")) continue;
+        // Strip markdown fences, bullets and table pipes — but NOT leading digits
+        line = line.replace(/^[\s\-\*>#`]+/, "").replace(/^\|/, "").replace(/\|$/, "").trim();
         const parts = line.split("|").map(s => s.replace(/\*\*/g, "").trim());
-        // Need at least code + name + price + verdict-ish
         if (parts.length < 4) continue;
         const code = (parts[0].match(/\d{4}/) || [])[0];
         if (!code) continue;
