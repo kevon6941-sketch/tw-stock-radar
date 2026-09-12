@@ -301,6 +301,306 @@ function USLinkagePanel({ usRows, onPickTheme }) {
   );
 }
 
+// --- 支撐壓力位計算 ---
+function calcLevels(data, ma) {
+  if (!data || data.length < 10) return null;
+  const recent = data.slice(-20);
+  const close = data[data.length - 1].close;
+
+  const high20 = Math.max(...recent.map(d => d.high));
+  const low20 = Math.min(...recent.map(d => d.low));
+
+  // 成交密集區：把價格切成 12 個區間，累加成交量找出量最大的帶
+  const step = (high20 - low20) / 12;
+  const buckets = Array.from({ length: 12 }, () => 0);
+  recent.forEach(d => {
+    const mid = (d.high + d.low) / 2;
+    let i = step > 0 ? Math.floor((mid - low20) / step) : 0;
+    i = Math.max(0, Math.min(11, i));
+    buckets[i] += d.volume;
+  });
+  const maxI = buckets.indexOf(Math.max(...buckets));
+  const denseLow = low20 + step * maxI;
+  const denseHigh = denseLow + step;
+
+  // 收集所有價位，分成支撐（低於現價）與壓力（高於現價）
+  const pts = [];
+  const push = (price, label, kind) => {
+    if (!price || !isFinite(price)) return;
+    pts.push({ price, label, kind });
+  };
+  push(high20, "20日高點", "swing");
+  push(low20, "20日低點", "swing");
+  if (ma?.ma5) push(ma.ma5, "5日均線", "ma");
+  if (ma?.ma10) push(ma.ma10, "10日均線", "ma");
+  if (ma?.ma20) push(ma.ma20, "月線", "ma");
+  push((denseLow + denseHigh) / 2, "成交密集區", "volume");
+
+  const supports = pts.filter(p => p.price < close).sort((a, b) => b.price - a.price);
+  const resistances = pts.filter(p => p.price > close).sort((a, b) => a.price - b.price);
+
+  return {
+    close, high20, low20,
+    dense: { low: denseLow, high: denseHigh },
+    supports: supports.slice(0, 4),
+    resistances: resistances.slice(0, 4),
+    nearestSupport: supports[0] || null,
+    nearestResistance: resistances[0] || null,
+  };
+}
+
+// --- 進出場價位試算 ---
+function calcTradePlan({ entry, stopPrice, capital, riskPct, levels }) {
+  if (!entry || entry <= 0) return null;
+  const stop = stopPrice && stopPrice > 0 && stopPrice < entry
+    ? stopPrice
+    : (levels?.nearestSupport?.price && levels.nearestSupport.price < entry
+        ? levels.nearestSupport.price * 0.99
+        : entry * 0.93);
+
+  const riskPerShare = entry - stop;
+  const stopLossPct = (riskPerShare / entry) * 100;
+
+  // 目標價：依風險報酬比推算，並對照壓力位
+  const targets = [1.5, 2, 3].map(r => ({
+    ratio: r,
+    price: entry + riskPerShare * r,
+  }));
+  const resistTarget = levels?.nearestResistance?.price || null;
+
+  // 部位大小：可承受虧損 ÷ 每股風險
+  let shares = null, lots = null, cost = null, maxLoss = null;
+  if (capital > 0 && riskPct > 0 && riskPerShare > 0) {
+    maxLoss = capital * (riskPct / 100);
+    shares = Math.floor(maxLoss / riskPerShare);
+    lots = Math.floor(shares / 1000);
+    cost = shares * entry;
+    // 不得超過總資金
+    if (cost > capital) {
+      shares = Math.floor(capital / entry);
+      lots = Math.floor(shares / 1000);
+      cost = shares * entry;
+      maxLoss = shares * riskPerShare;
+    }
+  }
+
+  return { entry, stop, riskPerShare, stopLossPct, targets, resistTarget, shares, lots, cost, maxLoss };
+}
+
+// --- 進場檢核清單項目 ---
+const ENTRY_CHECKLIST = [
+  { key: "trend", text: "股價站在月線之上，中期趨勢向上", auto: (s) => s.deep?.indicators?.ma20 ? parseFloat(s.price) > s.deep.indicators.ma20 : null },
+  { key: "notChasing", text: "沒有追高（乖離未過大、非當日大漲收最高）", auto: (s) => (s.risk || s.deep?.risk) ? false : true },
+  { key: "volume", text: "成交量足夠，不是冷門股（日均量 1000 張以上）", auto: (s) => s.volume ? s.volume / 1000 >= 1000 : null },
+  { key: "rsi", text: "RSI 未超買（低於 75）", auto: (s) => s.deep?.indicators?.rsi != null ? s.deep.indicators.rsi < 75 : null },
+  { key: "stop", text: "我已經決定停損價，而且能接受這個虧損金額" },
+  { key: "size", text: "部位大小算過，單筆風險不超過總資金的 2%" },
+  { key: "reason", text: "我說得出為什麼買這檔（不是因為它今天漲很多）" },
+  { key: "exit", text: "我知道什麼情況要出場（達標、跌破停損、訊號轉弱）" },
+];
+
+// --- 進出場計畫（價位試算 + 檢核清單）---
+function TradePlanner({ stock, levels }) {
+  const [entry, setEntry] = useState(String(stock.price || ""));
+  const [stopIn, setStopIn] = useState("");
+  const [capital, setCapital] = useState(() => localStorage.getItem("tw-stock-capital") || "");
+  const [riskPct, setRiskPct] = useState(() => localStorage.getItem("tw-stock-riskpct") || "2");
+  const [checked, setChecked] = useState({});
+
+  useEffect(() => { if (capital) localStorage.setItem("tw-stock-capital", capital); }, [capital]);
+  useEffect(() => { if (riskPct) localStorage.setItem("tw-stock-riskpct", riskPct); }, [riskPct]);
+
+  const plan = calcTradePlan({
+    entry: parseFloat(entry),
+    stopPrice: parseFloat(stopIn),
+    capital: parseFloat(capital),
+    riskPct: parseFloat(riskPct),
+    levels,
+  });
+
+  const autoResults = ENTRY_CHECKLIST.map(c => ({ ...c, autoVal: c.auto ? c.auto(stock) : null }));
+  const manualItems = autoResults.filter(c => !c.auto);
+  const passCount = autoResults.filter(c => c.auto ? c.autoVal === true : checked[c.key]).length;
+  const totalCount = autoResults.length;
+  const knownAuto = autoResults.filter(c => c.auto && c.autoVal !== null);
+  const failedAuto = knownAuto.filter(c => c.autoVal === false);
+
+  const inp = { background: "#0a0a0a", border: "1px solid #2a2a2a", borderRadius: 6, padding: "7px 9px", color: "#e5e5e5", fontSize: 15, outline: "none", width: "100%", boxSizing: "border-box" };
+  const lbl = { fontSize: 12, color: "#999", marginBottom: 3 };
+
+  return (
+    <div style={{ background: "#0a0a0a", borderRadius: 8, padding: 12, marginBottom: 10 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: "#ccc", marginBottom: 10 }}>進出場計畫</div>
+
+      {/* 輸入區 */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+        <div>
+          <div style={lbl}>打算買進價</div>
+          <input value={entry} onChange={e => setEntry(e.target.value)} inputMode="decimal" style={inp} />
+        </div>
+        <div>
+          <div style={lbl}>停損價（留空自動算）</div>
+          <input value={stopIn} onChange={e => setStopIn(e.target.value)} inputMode="decimal"
+            placeholder={plan ? plan.stop.toFixed(2) : ""} style={inp} />
+        </div>
+        <div>
+          <div style={lbl}>總資金（元）</div>
+          <input value={capital} onChange={e => setCapital(e.target.value)} inputMode="numeric"
+            placeholder="例：500000" style={inp} />
+        </div>
+        <div>
+          <div style={lbl}>單筆風險上限 %</div>
+          <input value={riskPct} onChange={e => setRiskPct(e.target.value)} inputMode="decimal" style={inp} />
+        </div>
+      </div>
+
+      {plan && (
+        <>
+          {/* 價位規劃 */}
+          <div style={{ background: "#111", borderRadius: 7, padding: 10, marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginBottom: 6 }}>
+              <span style={{ color: "#bbb" }}>停損價</span>
+              <span style={{ color: "#22c55e", fontWeight: 700 }}>
+                {plan.stop.toFixed(2)}　<span style={{ fontSize: 12 }}>(-{plan.stopLossPct.toFixed(1)}%)</span>
+              </span>
+            </div>
+            {plan.targets.map(t => (
+              <div key={t.ratio} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+                <span style={{ color: "#999" }}>目標價（風險報酬 1:{t.ratio}）</span>
+                <span style={{ color: "#ef4444", fontWeight: 600 }}>
+                  {t.price.toFixed(2)}　<span style={{ fontSize: 12 }}>(+{(((t.price - plan.entry) / plan.entry) * 100).toFixed(1)}%)</span>
+                </span>
+              </div>
+            ))}
+            {plan.resistTarget && (
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, paddingTop: 6, marginTop: 4, borderTop: "1px solid #1e1e1e" }}>
+                <span style={{ color: "#999" }}>最近壓力位</span>
+                <span style={{ color: "#f59e0b", fontWeight: 600 }}>{plan.resistTarget.toFixed(2)}</span>
+              </div>
+            )}
+          </div>
+
+          {/* 部位大小 */}
+          {plan.shares > 0 ? (
+            <div style={{ background: "#111", borderRadius: 7, padding: 10, marginBottom: 10 }}>
+              <div style={{ fontSize: 13, color: "#bbb", marginBottom: 6 }}>建議部位</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: 13 }}>
+                <div><span style={{ color: "#999" }}>可買　</span><span style={{ color: "#ddd", fontWeight: 600 }}>{plan.lots} 張{plan.shares % 1000 ? ` + ${plan.shares % 1000} 股` : ""}</span></div>
+                <div><span style={{ color: "#999" }}>投入　</span><span style={{ color: "#ddd", fontWeight: 600 }}>{Math.round(plan.cost).toLocaleString()} 元</span></div>
+                <div><span style={{ color: "#999" }}>最大虧損　</span><span style={{ color: "#22c55e", fontWeight: 600 }}>{Math.round(plan.maxLoss).toLocaleString()} 元</span></div>
+                <div><span style={{ color: "#999" }}>佔資金　</span><span style={{ color: "#ddd", fontWeight: 600 }}>{((plan.cost / parseFloat(capital)) * 100).toFixed(0)}%</span></div>
+              </div>
+              {plan.lots === 0 && (
+                <div style={{ fontSize: 12, color: "#fcd34d", marginTop: 6, lineHeight: 1.6 }}>
+                  依你的風險設定買不到一張，可考慮零股買進，或這檔不適合你目前的資金規模。
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: "#999", marginBottom: 10, lineHeight: 1.6 }}>
+              填入總資金後，會依停損距離自動算出該買幾張。
+            </div>
+          )}
+        </>
+      )}
+
+      {/* 檢核清單 */}
+      <div style={{ borderTop: "1px solid #1e1e1e", paddingTop: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: "#ccc" }}>進場檢核</span>
+          <span style={{ fontSize: 13, color: passCount === totalCount ? "#22c55e" : "#f59e0b" }}>
+            {passCount} / {totalCount}
+          </span>
+        </div>
+
+        {failedAuto.length > 0 && (
+          <div style={{ background: "#2a1510", border: "1px solid #f59e0b44", borderRadius: 6, padding: "7px 9px", marginBottom: 8, fontSize: 12, color: "#fcd34d", lineHeight: 1.6 }}>
+            有 {failedAuto.length} 項技術條件不符合，建議再想一下。
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {autoResults.map(c => {
+            const isAuto = !!c.auto;
+            const val = isAuto ? c.autoVal : !!checked[c.key];
+            const mark = isAuto
+              ? (c.autoVal === null ? "－" : c.autoVal ? "✓" : "✗")
+              : (checked[c.key] ? "✓" : "　");
+            const color = isAuto
+              ? (c.autoVal === null ? "#777" : c.autoVal ? "#22c55e" : "#ef4444")
+              : (checked[c.key] ? "#22c55e" : "#777");
+            return (
+              <button key={c.key}
+                onClick={() => !isAuto && setChecked(p => ({ ...p, [c.key]: !p[c.key] }))}
+                style={{ display: "flex", gap: 8, alignItems: "flex-start", textAlign: "left",
+                  background: "none", border: "none", padding: 0, cursor: isAuto ? "default" : "pointer" }}>
+                <span style={{ minWidth: 18, height: 18, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center",
+                  border: `1px solid ${color}55`, color, fontSize: 12, fontWeight: 700, flexShrink: 0, marginTop: 1 }}>
+                  {mark}
+                </span>
+                <span style={{ fontSize: 13, color: "#ccc", lineHeight: 1.6, flex: 1 }}>
+                  {c.text}
+                  {isAuto && <span style={{ fontSize: 11, color: "#777" }}>（自動判斷）</span>}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ fontSize: 11, color: "#777", marginTop: 10, lineHeight: 1.6 }}>
+          檢核只是幫你放慢速度思考，不代表通過就一定會賺。資料為前一交易日收盤，實際下單請以券商即時報價為準。
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- 支撐壓力位顯示 ---
+function LevelsPanel({ levels }) {
+  if (!levels) return null;
+  const { close, supports, resistances, dense } = levels;
+  const all = [...resistances].reverse().concat([{ price: close, label: "現價", kind: "now" }]).concat(supports);
+  const max = Math.max(...all.map(p => p.price));
+  const min = Math.min(...all.map(p => p.price));
+  const range = max - min || 1;
+
+  const kindColor = { swing: "#f59e0b", ma: "#60a5fa", volume: "#a78bfa", now: "#e5e5e5" };
+
+  return (
+    <div style={{ background: "#0a0a0a", borderRadius: 8, padding: 12, marginBottom: 10 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: "#ccc", marginBottom: 4 }}>支撐壓力位</div>
+      <div style={{ fontSize: 12, color: "#999", marginBottom: 10 }}>
+        成交密集區 {dense.low.toFixed(2)} ~ {dense.high.toFixed(2)}（近 20 日量能最集中的價格帶）
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {all.map((p, i) => {
+          const isNow = p.kind === "now";
+          const pos = ((p.price - min) / range) * 100;
+          return (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ minWidth: 58, fontSize: 13, fontWeight: isNow ? 700 : 600,
+                color: isNow ? "#e5e5e5" : p.price > close ? "#ef4444" : "#22c55e" }}>
+                {p.price.toFixed(2)}
+              </span>
+              <div style={{ flex: 1, height: isNow ? 3 : 1, background: "#1a1a1a", borderRadius: 2, position: "relative" }}>
+                <div style={{ position: "absolute", left: 0, top: 0, height: "100%", width: `${Math.max(8, pos)}%`,
+                  background: kindColor[p.kind] || "#333", borderRadius: 2, opacity: isNow ? 1 : 0.5 }} />
+              </div>
+              <span style={{ minWidth: 76, fontSize: 12, textAlign: "right",
+                color: isNow ? "#e5e5e5" : "#999", fontWeight: isNow ? 600 : 400 }}>
+                {p.label}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 11, color: "#777", marginTop: 9, lineHeight: 1.6 }}>
+        壓力位是上漲時可能遇到賣壓的價格，支撐位是下跌時可能有買盤承接的價格。跌破最近支撐通常是停損訊號。
+      </div>
+    </div>
+  );
+}
+
 // --- 由診斷結果解析出正確的股票代號 ---
 function resolveStock(result, stocks) {
   const q = (result.query || "").trim();
@@ -364,7 +664,44 @@ function useWatchlist() {
     return list.some(p => norm(p.id) === q || norm(p.name) === q);
   };
   const update = (id, data) => setList(prev => prev.map(p => norm(p.id) === norm(id) ? { ...p, ...data } : p));
-  return { list, add, remove, has, update };
+
+  // 記錄訊號變化：每天最多留一筆，保留最近 10 筆
+  const recordSignal = (id, verdict, price) => setList(prev => prev.map(p => {
+    if (norm(p.id) !== norm(id)) return p;
+    const today = new Date().toISOString().slice(0, 10);
+    const hist = p.signalHistory || [];
+    const last = hist[0];
+    if (last?.date === today) {
+      if (last.verdict === verdict) return p;
+      const copy = [...hist];
+      copy[0] = { date: today, verdict, price };
+      return { ...p, signalHistory: copy };
+    }
+    if (last?.verdict === verdict) return p;   // 訊號沒變就不記
+    return { ...p, signalHistory: [{ date: today, verdict, price }, ...hist].slice(0, 10) };
+  }));
+
+  return { list, add, remove, has, update, recordSignal };
+}
+
+// 訊號強弱排序，用於判斷轉強或轉弱
+const SIG_RANK = { "強力買進": 5, "買進": 4, "觀望": 3, "賣出": 2, "強力賣出": 1 };
+
+function getSignalChange(item, currentVerdict) {
+  const hist = item.signalHistory || [];
+  // 找出最近一筆跟現在不同的訊號
+  const prev = hist.find(h => h.verdict !== currentVerdict);
+  if (!prev) return null;
+  const now = SIG_RANK[currentVerdict] ?? 3;
+  const before = SIG_RANK[prev.verdict] ?? 3;
+  if (now === before) return null;
+  return {
+    from: prev.verdict,
+    to: currentVerdict,
+    date: prev.date,
+    direction: now > before ? "up" : "down",
+    steps: Math.abs(now - before),
+  };
 }
 
 // --- TWSE 官方 API（免金鑰、真實資料）---
@@ -1572,6 +1909,12 @@ function TabWatchlist({ watchlist, apiKey, priceMap }) {
 
       setLocalPrices(slim);
       try { localStorage.setItem("tw-stock-pricemap", JSON.stringify({ ...(priceMap || {}), ...slim })); } catch {}
+
+      // 記錄今日訊號，供變化比對
+      Object.entries(slim).forEach(([code, p]) => {
+        const v = calcVerdict(p);
+        watchlist.recordSignal(code, v.verdict, p.close);
+      });
       if (missing.length > 0) {
         setPriceError(`${missing.map(m => m.name || m.id).join("、")} 查無對應的上市股票資料`);
       }
@@ -1593,8 +1936,10 @@ function TabWatchlist({ watchlist, apiKey, priceMap }) {
     const p = effectiveMap[item.id];
     if (!p) return { ...item, live: null };
     const v = calcVerdict(p);
+    const change = getSignalChange(item, calcVerdict(p).verdict);
     return {
       ...item,
+      change,
       live: {
         price: p.close,
         pct: p.pct,
@@ -1642,6 +1987,40 @@ ${ctx}
         )}
       </div>
 
+      {/* 訊號變化警示 */}
+      {(() => {
+        const downs = enriched.filter(e => e.change?.direction === "down");
+        const ups = enriched.filter(e => e.change?.direction === "up");
+        if (downs.length === 0 && ups.length === 0) return null;
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+            {downs.length > 0 && (
+              <div style={{ background: "#0d1f0d", border: "1px solid #22c55e55", borderRadius: 8, padding: "9px 11px" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#86efac", marginBottom: 3 }}>
+                  {downs.length} 檔訊號轉弱
+                </div>
+                <div style={{ fontSize: 12, color: "#ccc", lineHeight: 1.6 }}>
+                  {downs.map(d => `${d.name || d.id}（${sigLabel(d.change.from)}→${sigLabel(d.change.to)}）`).join("、")}
+                </div>
+                <div style={{ fontSize: 11, color: "#999", marginTop: 4 }}>
+                  持有中的可考慮減碼或確認停損位是否被跌破
+                </div>
+              </div>
+            )}
+            {ups.length > 0 && (
+              <div style={{ background: "#2a1515", border: "1px solid #ef444455", borderRadius: 8, padding: "9px 11px" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#fca5a5", marginBottom: 3 }}>
+                  {ups.length} 檔訊號轉強
+                </div>
+                <div style={{ fontSize: 12, color: "#ccc", lineHeight: 1.6 }}>
+                  {ups.map(d => `${d.name || d.id}（${sigLabel(d.change.from)}→${sigLabel(d.change.to)}）`).join("、")}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {priceError && (
         <div style={{ padding: "9px 12px", background: "#2a1510", border: "1px solid #f59e0b44", borderRadius: 8, fontSize: 13, color: "#fcd34d", marginBottom: 10, lineHeight: 1.6 }}>
           {priceError}
@@ -1687,8 +2066,15 @@ ${ctx}
                       <div style={{ fontSize: 14, color: "#888" }}>{loadingPrices ? "載入中…" : "無資料"}</div>
                     )}
                   </div>
-                  <div style={{ padding: "4px 10px", borderRadius: 6, fontSize: 14, fontWeight: 600, background: vc + "18", color: vc, whiteSpace: "nowrap" }}>
-                    {sigLabel(verdict)}
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                    <div style={{ padding: "4px 10px", borderRadius: 6, fontSize: 14, fontWeight: 600, background: vc + "18", color: vc, whiteSpace: "nowrap" }}>
+                      {sigLabel(verdict)}
+                    </div>
+                    {item.change && (
+                      <span style={{ fontSize: 11, color: item.change.direction === "up" ? "#ef4444" : "#22c55e", whiteSpace: "nowrap" }}>
+                        {sigLabel(item.change.from)} → {sigLabel(item.change.to)}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -2306,11 +2692,22 @@ function TabScan({ mode, watchlist, scanState }) {
                       </div>
                     )}
 
+                    {/* 支撐壓力位與進出場計畫（需先載入歷史資料）*/}
+                    {history[stock.id]?.length >= 10 && (() => {
+                      const lv = calcLevels(history[stock.id], stock.deep?.indicators);
+                      return (
+                        <>
+                          <LevelsPanel levels={lv} />
+                          <TradePlanner stock={stock} levels={lv} />
+                        </>
+                      );
+                    })()}
+
                     {/* K 線圖 */}
                     {history[stock.id] === undefined ? (
                       <button onClick={() => loadHistory(stock.id)} disabled={loadingHist === stock.id}
                         style={{ width: "100%", padding: "9px 0", borderRadius: 8, border: "1px solid #2a2a2a", background: "#111", color: "#f97316", fontSize: 14, cursor: "pointer", marginBottom: 10 }}>
-                        {loadingHist === stock.id ? "載入中…" : "顯示近 20 日 K 線"}
+                        {loadingHist === stock.id ? "載入中…" : "載入支撐壓力位與進出場計畫"}
                       </button>
                     ) : history[stock.id].length > 0 ? (
                       <div style={{ background: "#0a0a0a", borderRadius: 8, padding: "8px 4px", marginBottom: 10 }}>
