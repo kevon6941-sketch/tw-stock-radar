@@ -894,53 +894,86 @@ function getSector(code) {
 const SECTOR_LIST = ["全部", "電子", "金融保險", "航運", "鋼鐵", "塑膠", "生技醫療", "食品", "營建", "汽車", "紡織", "電機機械", "觀光餐旅", "貿易百貨", "水泥", "橡膠", "造紙", "玻璃陶瓷", "電器電纜", "其他"];
 
 // --- K 線圖元件 ---
-function KLineChart({ data, height = 160 }) {
+function KLineChart({ data, height = 210 }) {
   if (!data || data.length < 2) return null;
-  const w = 320, padL = 4, padR = 40, padT = 8, padB = 18;
-  const cw = w - padL - padR, ch = height - padT - padB;
+  const w = 340, padL = 4, padR = 42, padT = 10;
+  const volH = 34, gap = 8, dateH = 16;
+  const ch = height - padT - volH - gap - dateH;
+
   const highs = data.map(d => d.high), lows = data.map(d => d.low);
   const max = Math.max(...highs), min = Math.min(...lows);
   const range = max - min || 1;
+  const cw = w - padL - padR;
   const y = v => padT + ch - ((v - min) / range) * ch;
-  const bw = Math.max(2, (cw / data.length) * 0.65);
+  const bw = Math.max(3, (cw / data.length) * 0.68);
   const x = i => padL + (i + 0.5) * (cw / data.length);
 
-  // 5日均線
-  const ma5 = data.map((_, i) => {
-    if (i < 4) return null;
-    return data.slice(i - 4, i + 1).reduce((s, d) => s + d.close, 0) / 5;
-  });
+  const maxVol = Math.max(...data.map(d => d.volume || 0)) || 1;
+  const volY = v => padT + ch + gap + volH - (v / maxVol) * volH;
+
+  const ma5 = data.map((_, i) => i < 4 ? null : data.slice(i - 4, i + 1).reduce((s, d) => s + d.close, 0) / 5);
   const maPath = ma5.map((v, i) => v === null ? null : `${x(i)},${y(v)}`).filter(Boolean).join(" ");
+
+  const last = data[data.length - 1];
 
   return (
     <svg viewBox={`0 0 ${w} ${height}`} style={{ width: "100%", display: "block" }}>
-      {/* 水平參考線 */}
-      {[0, 0.5, 1].map(t => (
+      {/* 價格格線 */}
+      {[0, 0.25, 0.5, 0.75, 1].map(t => (
         <g key={t}>
-          <line x1={padL} y1={padT + ch * t} x2={padL + cw} y2={padT + ch * t} stroke="#1e1e1e" strokeWidth="1" />
-          <text x={w - padR + 4} y={padT + ch * t + 4} fill="#777" fontSize="10">
+          <line x1={padL} y1={padT + ch * t} x2={padL + cw} y2={padT + ch * t}
+            stroke="#1c1c1c" strokeWidth="1" strokeDasharray={t === 0 || t === 1 ? "0" : "2,3"} />
+          <text x={w - padR + 4} y={padT + ch * t + 3.5} fill="#999" fontSize="9.5">
             {(max - range * t).toFixed(1)}
           </text>
         </g>
       ))}
+
+      {/* 現價水平線 */}
+      <line x1={padL} y1={y(last.close)} x2={padL + cw} y2={y(last.close)}
+        stroke="#f97316" strokeWidth="0.8" strokeDasharray="3,2" opacity="0.6" />
+      <rect x={w - padR + 1} y={y(last.close) - 7} width={40} height={14} rx={3} fill="#f97316" />
+      <text x={w - padR + 21} y={y(last.close) + 3.5} fill="#fff" fontSize="9.5" fontWeight="700" textAnchor="middle">
+        {last.close.toFixed(1)}
+      </text>
+
       {/* K 棒 */}
       {data.map((d, i) => {
         const up = d.close >= d.open;
         const col = up ? "#ef4444" : "#22c55e";
         const bodyTop = y(Math.max(d.open, d.close));
-        const bodyH = Math.max(1, Math.abs(y(d.open) - y(d.close)));
+        const bodyH = Math.max(1.2, Math.abs(y(d.open) - y(d.close)));
         return (
           <g key={i}>
-            <line x1={x(i)} y1={y(d.high)} x2={x(i)} y2={y(d.low)} stroke={col} strokeWidth="1" />
-            <rect x={x(i) - bw / 2} y={bodyTop} width={bw} height={bodyH} fill={up ? col : "none"} stroke={col} strokeWidth="1" />
+            <line x1={x(i)} y1={y(d.high)} x2={x(i)} y2={y(d.low)} stroke={col} strokeWidth="1.1" />
+            <rect x={x(i) - bw / 2} y={bodyTop} width={bw} height={bodyH}
+              fill={up ? col : "#0a0a0a"} stroke={col} strokeWidth="1.1" />
           </g>
         );
       })}
+
       {/* 5MA */}
-      {maPath && <polyline points={maPath} fill="none" stroke="#f59e0b" strokeWidth="1.2" opacity="0.85" />}
-      {/* 日期標示 */}
-      <text x={padL} y={height - 4} fill="#777" fontSize="10">{data[0]?.date?.slice(-5)}</text>
-      <text x={padL + cw} y={height - 4} fill="#777" fontSize="10" textAnchor="end">{data[data.length - 1]?.date?.slice(-5)}</text>
+      {maPath && <polyline points={maPath} fill="none" stroke="#f59e0b" strokeWidth="1.4" opacity="0.9" />}
+
+      {/* 成交量 */}
+      <line x1={padL} y1={padT + ch + gap + volH} x2={padL + cw} y2={padT + ch + gap + volH} stroke="#1c1c1c" strokeWidth="1" />
+      {data.map((d, i) => {
+        const up = d.close >= d.open;
+        const vy = volY(d.volume || 0);
+        return (
+          <rect key={i} x={x(i) - bw / 2} y={vy} width={bw}
+            height={Math.max(0.8, padT + ch + gap + volH - vy)}
+            fill={up ? "#ef4444" : "#22c55e"} opacity="0.5" />
+        );
+      })}
+      <text x={w - padR + 4} y={padT + ch + gap + 8} fill="#999" fontSize="9">量</text>
+
+      {/* 日期 */}
+      <text x={padL} y={height - 3} fill="#999" fontSize="9.5">{data[0]?.date?.slice(-5)}</text>
+      <text x={padL + cw / 2} y={height - 3} fill="#999" fontSize="9.5" textAnchor="middle">
+        {data[Math.floor(data.length / 2)]?.date?.slice(-5)}
+      </text>
+      <text x={padL + cw} y={height - 3} fill="#999" fontSize="9.5" textAnchor="end">{last?.date?.slice(-5)}</text>
     </svg>
   );
 }
@@ -1864,6 +1897,8 @@ function TabWatchlist({ watchlist, apiKey, priceMap }) {
   const [expanded, setExpanded] = useState(null);
   const [aiInfo, setAiInfo] = useState({});
   const [localPrices, setLocalPrices] = useState(null);
+  const [wHistory, setWHistory] = useState({});
+  const [wLoadingHist, setWLoadingHist] = useState(null);
   const [loadingPrices, setLoadingPrices] = useState(false);
   const [priceError, setPriceError] = useState("");
 
@@ -1953,6 +1988,18 @@ function TabWatchlist({ watchlist, apiKey, priceMap }) {
       },
     };
   });
+
+  const loadWHistory = async (code) => {
+    if (wHistory[code]) return;
+    setWLoadingHist(code);
+    try {
+      const d = await fetchStockHistory(code);
+      setWHistory(prev => ({ ...prev, [code]: d.slice(-20) }));
+    } catch {
+      setWHistory(prev => ({ ...prev, [code]: [] }));
+    }
+    setWLoadingHist(null);
+  };
 
   const askAI = async (item) => {
     if (!apiKey.hasKey) return;
@@ -2118,6 +2165,45 @@ ${ctx}
                         <button onClick={refreshPrices} disabled={loadingPrices}
                           style={{ marginLeft: 8, padding: "4px 12px", borderRadius: 6, border: "1px solid #333", background: "#141414", color: "#f59e0b", fontSize: 13, cursor: "pointer" }}>
                           {loadingPrices ? "更新中…" : "立即更新"}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* K 線與進出場計畫 */}
+                    {wHistory[item.id] === undefined ? (
+                      <button onClick={() => loadWHistory(item.id)} disabled={wLoadingHist === item.id}
+                        style={{ width: "100%", padding: "10px 0", borderRadius: 8, border: "1px solid #2a2a2a", background: "#111", color: "#f97316", fontSize: 15, fontWeight: 600, cursor: "pointer", marginBottom: 10 }}>
+                        {wLoadingHist === item.id ? "載入中…" : "看 K 線圖 / 支撐壓力 / 進出場計畫"}
+                      </button>
+                    ) : wHistory[item.id].length > 0 ? (
+                      <>
+                        <div style={{ background: "#0a0a0a", borderRadius: 8, padding: "10px 4px 6px", marginBottom: 10 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 8px", marginBottom: 4 }}>
+                            <span style={{ fontSize: 13, color: "#ccc", fontWeight: 600 }}>近 20 日 K 線</span>
+                            <span style={{ fontSize: 11, color: "#999" }}>
+                              <span style={{ color: "#ef4444" }}>■</span> 紅K　
+                              <span style={{ color: "#22c55e" }}>■</span> 黑K　
+                              <span style={{ color: "#f59e0b" }}>—</span> 5MA
+                            </span>
+                          </div>
+                          <KLineChart data={wHistory[item.id]} />
+                        </div>
+                        {wHistory[item.id].length >= 10 && (() => {
+                          const lv = calcLevels(wHistory[item.id], null);
+                          return (
+                            <>
+                              <LevelsPanel levels={lv} />
+                              <TradePlanner stock={{ id: item.id, price: live?.price, volume: live?.volume, risk: live?.risk }} levels={lv} />
+                            </>
+                          );
+                        })()}
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 13, color: "#fcd34d", background: "#2a1510", borderRadius: 8, padding: "9px 11px", marginBottom: 10 }}>
+                        歷史資料載入失敗，
+                        <button onClick={() => setWHistory(p => { const c = { ...p }; delete c[item.id]; return c; })}
+                          style={{ background: "none", border: "none", color: "#f97316", fontSize: 13, cursor: "pointer", textDecoration: "underline", padding: 0 }}>
+                          重試
                         </button>
                       </div>
                     )}
@@ -2692,7 +2778,40 @@ function TabScan({ mode, watchlist, scanState }) {
                       </div>
                     )}
 
-                    {/* 支撐壓力位與進出場計畫（需先載入歷史資料）*/}
+                    {/* 載入按鈕 */}
+                    {history[stock.id] === undefined && (
+                      <button onClick={() => loadHistory(stock.id)} disabled={loadingHist === stock.id}
+                        style={{ width: "100%", padding: "10px 0", borderRadius: 8, border: "1px solid #2a2a2a", background: "#111", color: "#f97316", fontSize: 15, fontWeight: 600, cursor: "pointer", marginBottom: 10 }}>
+                        {loadingHist === stock.id ? "載入中…" : "看 K 線圖 / 支撐壓力 / 進出場計畫"}
+                      </button>
+                    )}
+
+                    {/* K 線圖（優先顯示）*/}
+                    {history[stock.id]?.length > 0 && (
+                      <div style={{ background: "#0a0a0a", borderRadius: 8, padding: "10px 4px 6px", marginBottom: 10 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 8px", marginBottom: 4 }}>
+                          <span style={{ fontSize: 13, color: "#ccc", fontWeight: 600 }}>近 20 日 K 線</span>
+                          <span style={{ fontSize: 11, color: "#999" }}>
+                            <span style={{ color: "#ef4444" }}>■</span> 紅K　
+                            <span style={{ color: "#22c55e" }}>■</span> 黑K　
+                            <span style={{ color: "#f59e0b" }}>—</span> 5MA
+                          </span>
+                        </div>
+                        <KLineChart data={history[stock.id]} />
+                      </div>
+                    )}
+
+                    {history[stock.id]?.length === 0 && (
+                      <div style={{ fontSize: 13, color: "#fcd34d", background: "#2a1510", borderRadius: 8, padding: "9px 11px", marginBottom: 10, lineHeight: 1.6 }}>
+                        歷史資料載入失敗（代理伺服器不穩），
+                        <button onClick={() => { setHistory(p => { const c = { ...p }; delete c[stock.id]; return c; }); }}
+                          style={{ marginLeft: 4, background: "none", border: "none", color: "#f97316", fontSize: 13, cursor: "pointer", textDecoration: "underline", padding: 0 }}>
+                          重試
+                        </button>
+                      </div>
+                    )}
+
+                    {/* 支撐壓力位與進出場計畫 */}
                     {history[stock.id]?.length >= 10 && (() => {
                       const lv = calcLevels(history[stock.id], stock.deep?.indicators);
                       return (
@@ -2702,23 +2821,6 @@ function TabScan({ mode, watchlist, scanState }) {
                         </>
                       );
                     })()}
-
-                    {/* K 線圖 */}
-                    {history[stock.id] === undefined ? (
-                      <button onClick={() => loadHistory(stock.id)} disabled={loadingHist === stock.id}
-                        style={{ width: "100%", padding: "9px 0", borderRadius: 8, border: "1px solid #2a2a2a", background: "#111", color: "#f97316", fontSize: 14, cursor: "pointer", marginBottom: 10 }}>
-                        {loadingHist === stock.id ? "載入中…" : "載入支撐壓力位與進出場計畫"}
-                      </button>
-                    ) : history[stock.id].length > 0 ? (
-                      <div style={{ background: "#0a0a0a", borderRadius: 8, padding: "8px 4px", marginBottom: 10 }}>
-                        <div style={{ fontSize: 12, color: "#888", paddingLeft: 6, marginBottom: 2 }}>
-                          近 20 日 K 線　<span style={{ color: "#f59e0b" }}>— 5MA</span>
-                        </div>
-                        <KLineChart data={history[stock.id]} />
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: 13, color: "#888", marginBottom: 10 }}>K 線資料載入失敗</div>
-                    )}
 
                     <button onClick={() => watchlist.add({ id: stock.id, name: stock.name, verdict: stock.verdict })}
                       disabled={watchlist.has(stock.id)}
