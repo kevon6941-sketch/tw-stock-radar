@@ -1,0 +1,43 @@
+name: Fetch TWSE Data
+
+on:
+  schedule:
+    # 台灣時間每日 16:30 與 21:00（UTC 08:30 / 13:00）
+    - cron: '30 8 * * 1-5'
+    - cron: '0 13 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch TWSE open data
+        run: |
+          mkdir -p public/data
+          echo "抓取個股收盤行情…"
+          curl -sSL --retry 3 --retry-delay 5 \
+            "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL" \
+            -o public/data/stock_day_all.json
+          echo "抓取加權指數…"
+          curl -sSL --retry 3 --retry-delay 5 \
+            "https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX" \
+            -o public/data/mi_index.json
+          echo "抓取本益比殖利率…"
+          curl -sSL --retry 3 --retry-delay 5 \
+            "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL" \
+            -o public/data/bwibbu_all.json || true
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > public/data/updated_at.txt
+          ls -la public/data/
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/data
+          git diff --staged --quiet || git commit -m "chore: 更新證交所資料 $(date -u +%Y-%m-%d)"
+          git push
