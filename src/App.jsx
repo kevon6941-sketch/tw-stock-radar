@@ -132,7 +132,9 @@ async function callAI(prompt, apiKey, provider) {
     });
     if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err?.error?.message || "API error " + resp.status); }
     const data = await resp.json();
-    return data.content?.filter(i => i.type === "text").map(i => i.text).join("\n") || "";
+    const out = data.content?.filter(i => i.type === "text").map(i => i.text).join("\n") || "";
+    const usedSearch = data.content?.some(i => i.type === "server_tool_use" || i.type === "web_search_tool_result");
+    return { text: out, grounded: !!usedSearch };
   } else {
     // Gemini API - key must be in URL for browser CORS to work
     const makeRequest = async (useSearch) => {
@@ -152,18 +154,23 @@ async function callAI(prompt, apiKey, provider) {
       }
       return resp.json();
     };
-    let data;
+    let data, grounded = false;
     try {
       data = await makeRequest(true);
+      // Check if search grounding actually returned sources
+      const meta = data?.candidates?.[0]?.groundingMetadata;
+      grounded = !!(meta?.groundingChunks?.length || meta?.webSearchQueries?.length);
     } catch (e) {
       // If google_search not available, retry without
       try {
         data = await makeRequest(false);
+        grounded = false;
       } catch (e2) {
         throw e2;
       }
     }
-    return (data?.candidates?.[0]?.content?.parts || []).map(p => p.text || "").join("\n");
+    const out = (data?.candidates?.[0]?.content?.parts || []).map(p => p.text || "").join("\n");
+    return { text: out, grounded };
   }
 }
 
@@ -176,8 +183,12 @@ function SettingsPanel({ apiKey, onClose }) {
   const testKey = async () => {
     setTesting(true); setTestResult(null);
     try {
-      await callAI("回答兩個字：成功", input, apiKey.provider);
-      setTestResult({ ok: true, msg: "✅ 驗證成功！可以開始使用 AI 診斷了。" });
+      const r = await callAI("台積電2330今天的收盤價是多少？只回答數字。", input, apiKey.provider);
+      if (r.grounded) {
+        setTestResult({ ok: true, msg: "✅ 驗證成功，且即時搜尋可用！股價資料會是真實的。" });
+      } else {
+        setTestResult({ ok: true, warn: true, msg: "⚠️ Key 可用，但「即時搜尋」沒有啟用。AI 會用舊資料推測股價，數字不可信。建議改用 Anthropic Claude，或到 Google Cloud 啟用 Grounding with Google Search。" });
+      }
       apiKey.save(input);
     } catch (e) {
       setTestResult({ ok: false, msg: "❌ 驗證失敗：" + e.message });
@@ -226,7 +237,10 @@ function SettingsPanel({ apiKey, onClose }) {
       </div>
 
       {testResult && (
-        <div style={{ padding: 12, borderRadius: 8, fontSize: 15, background: testResult.ok ? "#052e16" : "#2a1515", color: testResult.ok ? "#86efac" : "#fca5a5", border: "1px solid " + (testResult.ok ? "#16a34a" : "#dc2626") }}>
+        <div style={{ padding: 12, borderRadius: 8, fontSize: 15, lineHeight: 1.7,
+          background: testResult.warn ? "#2a1510" : testResult.ok ? "#052e16" : "#2a1515",
+          color: testResult.warn ? "#fcd34d" : testResult.ok ? "#86efac" : "#fca5a5",
+          border: "1px solid " + (testResult.warn ? "#f59e0b" : testResult.ok ? "#16a34a" : "#dc2626") }}>
           {testResult.msg}
         </div>
       )}
@@ -274,7 +288,7 @@ function TabDiagnosis({ watchlist, apiKey }) {
     try {
       // Step 1: Technical + Verdict
       setStep("搜尋股價與技術指標…");
-      const techText = await callAI(`你是台股首席分析師。用戶查詢：「${searchQ}」
+      const { text: techText, grounded: g1 } = await callAI(`你是台股首席分析師。用戶查詢：「${searchQ}」
 
 請搜尋這檔股票最新資料，嚴格按以下格式回答（繁體中文）：
 
@@ -293,7 +307,7 @@ function TabDiagnosis({ watchlist, apiKey }) {
 
       // Step 2: Financial report
       setStep("分析財報數據…");
-      const finText = await callAI(`你是台股財報分析師。請搜尋「${searchQ}」這檔股票的最新財報數據。
+      const { text: finText } = await callAI(`你是台股財報分析師。請搜尋「${searchQ}」這檔股票的最新財報數據。
 
 請嚴格按照以下格式回答，每項給出 0-100 的評分：
 
@@ -323,7 +337,7 @@ function TabDiagnosis({ watchlist, apiKey }) {
 
       // Step 3: News
       setStep("搜尋最新相關新聞…");
-      const newsText = await callAI(`搜尋「${searchQ}」台股 最近一週的重要新聞，找出 3-5 則最關鍵的新聞。
+      const { text: newsText } = await callAI(`搜尋「${searchQ}」台股 最近一週的重要新聞，找出 3-5 則最關鍵的新聞。
 
 請嚴格按以下格式回答（繁體中文）：
 
@@ -342,7 +356,7 @@ function TabDiagnosis({ watchlist, apiKey }) {
       const verdict = parseVerdict(techText);
       const info = parseStockInfo(techText);
       const finScores = parseFinancialScores(finText);
-      setResult({ query: searchQ, techText, finText, newsText, verdict, ...info, finScores, time: new Date() });
+      setResult({ query: searchQ, techText, finText, newsText, verdict, ...info, finScores, grounded: g1, time: new Date() });
       setHistory(h => [{ query: searchQ, verdict, time: new Date().toISOString() }, ...h.slice(0, 14)]);
     } catch (e) {
       const msg = e.message === "NO_KEY" ? "請先設定 API Key" : e.message || "連線失敗，請稍後再試";
@@ -425,6 +439,14 @@ function TabDiagnosis({ watchlist, apiKey }) {
       {result && !loading && (
         <div style={{ padding: 14 }}>
           {/* Verdict */}
+          {result.grounded === false && (
+            <div style={{ background: "#2a1510", border: "2px solid #f59e0b", borderRadius: 10, padding: 12, marginBottom: 10 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#f59e0b", marginBottom: 4 }}>⚠️ 未使用即時搜尋</div>
+              <div style={{ fontSize: 13, color: "#ddd", lineHeight: 1.7 }}>
+                以下數字可能是 AI 推測的舊資料，不是今日真實股價。下單前請到券商 App 確認。
+              </div>
+            </div>
+          )}
           <VerdictCard verdict={result.verdict} stockName={result.stockName} price={result.price} change={result.change} />
 
           {/* Add to watchlist button */}
@@ -506,7 +528,7 @@ function TabWatchlist({ watchlist, apiKey }) {
   const refresh = async (item) => {
     setRefreshing(item.id);
     try {
-      const text = await callAI(`你是台股分析師。請搜尋「${item.name || item.id}」的最新股價與今日漲跌幅，以及目前該買進還是賣出。
+      const { text, grounded } = await callAI(`你是台股分析師。請搜尋「${item.name || item.id}」的最新股價與今日漲跌幅，以及目前該買進還是賣出。
 
 用以下格式簡短回答（繁體中文）：
 💰 [股價] 元（[漲跌幅%]）
@@ -588,85 +610,10 @@ function TabWatchlist({ watchlist, apiKey }) {
 // ====================================
 const SCAN_STOCKS = ["2330 台積電", "2317 鴻海", "2454 聯發科", "2382 廣達", "3231 緯創", "2308 台達電", "2881 富邦金", "2882 國泰金", "2603 長榮", "3661 世芯-KY", "2345 智邦", "6669 緯穎", "2357 華碩", "2409 友達", "2002 中鋼", "6770 力積電"];
 
-function TabScan({ mode, watchlist, apiKey }) {
-  const [stocks, setStocks] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("tw-stock-scan")) || []; }
-    catch { return []; }
-  });
-  const [loading, setLoading] = useState(false);
-  const [progress, setProgress] = useState("");
-  const [lastScan, setLastScan] = useState(() => localStorage.getItem("tw-stock-scan-time") || "");
-  const [rawText, setRawText] = useState("");
+function TabScan({ mode, watchlist, apiKey, scanState }) {
+  const { stocks, scanning: loading, scanError: progress, rawText, lastScan, scan } = scanState;
   const [selected, setSelected] = useState(null);
 
-  const scan = async () => {
-    if (!apiKey.hasKey) return;
-    setLoading(true); setProgress(""); setRawText("");
-    try {
-      const text = await callAI(`請搜尋以下台股今日最新收盤價，並判斷該買還是該賣。
-
-股票：${SCAN_STOCKS.join("、")}
-
-輸出規則：每檔股票一行，欄位用半形直線 | 分隔，總共七個欄位，不要加編號、不要加項目符號、不要加表格線、不要有其他說明文字。
-
-格式：代號|名稱|收盤價|漲跌幅|判定|理由|產業
-
-範例輸出：
-2330|台積電|1050|+2.3%|買進|外資連買三天站穩均線|半導體
-2317|鴻海|235|-0.5%|觀望|量縮整理等待方向|電子代工
-
-判定欄位只能填這五種其中一種：強力買進、買進、觀望、賣出、強力賣出
-
-現在請直接輸出 16 行資料：`, apiKey.key, apiKey.provider);
-
-      setRawText(text);
-
-      // Very lenient parsing
-      const parsed = [];
-      const lines = text.split("\n");
-      for (let rawLine of lines) {
-        let line = rawLine.trim();
-        if (!line.includes("|")) continue;
-        // Strip markdown fences, bullets and table pipes — but NOT leading digits
-        line = line.replace(/^[\s\-\*>#`]+/, "").replace(/^\|/, "").replace(/\|$/, "").trim();
-        const parts = line.split("|").map(s => s.replace(/\*\*/g, "").trim());
-        if (parts.length < 4) continue;
-        const code = (parts[0].match(/\d{4}/) || [])[0];
-        if (!code) continue;
-        // Find the verdict field (may not be exactly index 4)
-        const verdicts = ["強力買進", "強力賣出", "買進", "賣出", "觀望"];
-        let verdict = "觀望", verdictIdx = -1;
-        for (let i = 0; i < parts.length; i++) {
-          const found = verdicts.find(v => parts[i].includes(v));
-          if (found) { verdict = found; verdictIdx = i; break; }
-        }
-        parsed.push({
-          id: code,
-          name: parts[1] || code,
-          price: parts[2] || "—",
-          change: parts[3] || "",
-          verdict,
-          reason: verdictIdx >= 0 ? (parts[verdictIdx + 1] || "") : (parts[5] || ""),
-          sector: verdictIdx >= 0 ? (parts[verdictIdx + 2] || "") : (parts[6] || ""),
-        });
-      }
-
-      if (parsed.length > 0) {
-        setStocks(parsed);
-        localStorage.setItem("tw-stock-scan", JSON.stringify(parsed));
-        const timeStr = new Date().toLocaleString("zh-TW");
-        setLastScan(timeStr);
-        localStorage.setItem("tw-stock-scan-time", timeStr);
-      } else {
-        setProgress("解析失敗，下方是 AI 的原始回覆");
-      }
-    } catch (e) {
-      setProgress("掃描失敗：" + e.message);
-      setLoading(false);
-      return;
-    }
-    setLoading(false);
-  };
 
   const verdictColors = { "強力買進": "#dc2626", "買進": "#ef4444", "觀望": "#f59e0b", "賣出": "#22c55e", "強力賣出": "#16a34a" };
   const verdictScore = { "強力買進": 5, "買進": 4, "觀望": 3, "賣出": 2, "強力賣出": 1 };
@@ -801,10 +748,115 @@ export default function App() {
   const watchlist = useWatchlist();
   const apiKey = useApiKey();
 
-  const enriched = [];
-  const buyCount = "—";
-  const sellCount = "—";
-  const strongBuy = "";
+  // Shared scan state across buy/sell tabs
+  const [stocks, setStocks] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("tw-stock-scan")) || []; }
+    catch { return []; }
+  });
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState("");
+  const [rawText, setRawText] = useState("");
+  const [lastScan, setLastScan] = useState(() => localStorage.getItem("tw-stock-scan-time") || "");
+  const [grounded, setGrounded] = useState(() => localStorage.getItem("tw-stock-grounded") === "1");
+
+  // Market index
+  const [index, setIndex] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("tw-stock-index")) || null; }
+    catch { return null; }
+  });
+
+  const fetchIndex = async () => {
+    if (!apiKey.hasKey) return;
+    try {
+      const { text, grounded } = await callAI(`請搜尋台灣加權股價指數（TAIEX）今日最新收盤點數和漲跌幅。
+
+只回傳一行，格式如下，不要其他文字：
+點數|漲跌點|漲跌幅
+
+範例：
+24580.12|+125.30|+0.51%`, apiKey.key, apiKey.provider);
+      const line = text.split("\n").find(l => l.includes("|"));
+      if (line) {
+        const parts = line.replace(/^[\s\-\*>#`|]+/, "").replace(/\|$/, "").split("|").map(s => s.trim());
+        if (parts.length >= 3) {
+          const idx = { value: parts[0], change: parts[1], pct: parts[2], grounded, time: new Date().toLocaleString("zh-TW") };
+          setIndex(idx);
+          localStorage.setItem("tw-stock-index", JSON.stringify(idx));
+        }
+      }
+    } catch {}
+  };
+
+  const scan = async () => {
+    if (!apiKey.hasKey || scanning) return;
+    setScanning(true); setScanError(""); setRawText("");
+    try {
+      const { text, grounded } = await callAI(`請搜尋以下台股今日最新收盤價，並判斷該買還是該賣。
+
+股票：${SCAN_STOCKS.join("、")}
+
+輸出規則：每檔股票一行，欄位用半形直線 | 分隔，總共七個欄位，不要加編號、不要加項目符號、不要加表格線、不要有其他說明文字。
+
+格式：代號|名稱|收盤價|漲跌幅|判定|理由|產業
+
+範例輸出：
+2330|台積電|1050|+2.3%|買進|外資連買三天站穩均線|半導體
+2317|鴻海|235|-0.5%|觀望|量縮整理等待方向|電子代工
+
+判定欄位只能填這五種其中一種：強力買進、買進、觀望、賣出、強力賣出
+
+現在請直接輸出 16 行資料：`, apiKey.key, apiKey.provider);
+
+      setRawText(text);
+      const parsed = [];
+      for (let rawLine of text.split("\n")) {
+        let line = rawLine.trim();
+        if (!line.includes("|")) continue;
+        line = line.replace(/^[\s\-\*>#`]+/, "").replace(/^\|/, "").replace(/\|$/, "").trim();
+        const parts = line.split("|").map(s => s.replace(/\*\*/g, "").trim());
+        if (parts.length < 4) continue;
+        const code = (parts[0].match(/\d{4}/) || [])[0];
+        if (!code) continue;
+        const verdicts = ["強力買進", "強力賣出", "買進", "賣出", "觀望"];
+        let verdict = "觀望", vi = -1;
+        for (let i = 0; i < parts.length; i++) {
+          const f = verdicts.find(v => parts[i].includes(v));
+          if (f) { verdict = f; vi = i; break; }
+        }
+        parsed.push({
+          id: code, name: parts[1] || code, price: parts[2] || "—", change: parts[3] || "", verdict,
+          reason: vi >= 0 ? (parts[vi + 1] || "") : (parts[5] || ""),
+          sector: vi >= 0 ? (parts[vi + 2] || "") : (parts[6] || ""),
+        });
+      }
+      if (parsed.length > 0) {
+        setStocks(parsed);
+        setGrounded(grounded);
+        localStorage.setItem("tw-stock-scan", JSON.stringify(parsed));
+        localStorage.setItem("tw-stock-grounded", grounded ? "1" : "0");
+        const t = new Date().toLocaleString("zh-TW");
+        setLastScan(t);
+        localStorage.setItem("tw-stock-scan-time", t);
+      } else {
+        setScanError("解析失敗，下方是 AI 的原始回覆");
+      }
+    } catch (e) {
+      setScanError("掃描失敗：" + e.message);
+    }
+    setScanning(false);
+  };
+
+  // Auto-run on load when API key exists and data is stale (>30 min) or empty
+  useEffect(() => {
+    if (!apiKey.hasKey) return;
+    const stale = !lastScan || (Date.now() - new Date(lastScan).getTime()) > 30 * 60 * 1000;
+    if (stocks.length === 0 || stale) scan();
+    if (!index || stale) fetchIndex();
+  }, [apiKey.hasKey]);
+
+  const scanState = { stocks, scanning, scanError, rawText, lastScan, scan };
+  const buyCount = stocks.filter(s => s.verdict === "買進" || s.verdict === "強力買進").length;
+  const sellCount = stocks.filter(s => s.verdict === "賣出" || s.verdict === "強力賣出").length;
 
   return (
     <div style={{ minHeight: "100vh", background: "#0a0a0a", color: "#e5e5e5", fontFamily: "'Inter', 'Noto Sans TC', system-ui, sans-serif" }}>
@@ -821,7 +873,16 @@ export default function App() {
               </button>
             </div>
           </div>
-          <div style={{ fontSize: 14, color: "#aaa" }}>{now.toLocaleDateString("zh-TW", { year: "numeric", month: "long", day: "numeric", weekday: "long" })} · AI 全面診斷</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 14, color: "#aaa" }}>{now.toLocaleDateString("zh-TW", { year: "numeric", month: "long", day: "numeric", weekday: "long" })}</span>
+            {apiKey.hasKey && (
+              <button onClick={() => { scan(); fetchIndex(); }} disabled={scanning}
+                style={{ background: "none", border: "none", color: scanning ? "#666" : "#f97316", fontSize: 13, cursor: scanning ? "wait" : "pointer", padding: 0 }}>
+                {scanning ? "更新中…" : "🔄 全部更新"}
+              </button>
+            )}
+            {lastScan && !scanning && <span style={{ fontSize: 12, color: "#777" }}>{lastScan}</span>}
+          </div>
         </div>
       </div>
 
@@ -829,9 +890,9 @@ export default function App() {
         {/* Market cards */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, margin: "12px 0" }}>
           {[
-            { label: "加權指數", val: "47,183", sub: "▲ 0.16%", col: "#ef4444" },
-            { label: "可買進", val: "—", sub: "掃描查看", col: "#ef4444" },
-            { label: "應賣出", val: "—", sub: "掃描查看", col: "#22c55e" },
+            { label: "加權指數", val: index?.value || "—", sub: index ? `${index.change} (${index.pct})` : (apiKey.hasKey ? "查詢中…" : "需設定 Key"), col: index?.pct?.startsWith("-") ? "#22c55e" : "#ef4444" },
+            { label: "可買進", val: stocks.length ? `${buyCount}` : "—", sub: stocks.length ? "檔" : (scanning ? "掃描中…" : "待掃描"), col: "#ef4444" },
+            { label: "應賣出", val: stocks.length ? `${sellCount}` : "—", sub: stocks.length ? "檔" : (scanning ? "掃描中…" : "待掃描"), col: "#22c55e" },
             { label: "自選股", val: `${watchlist.list.length}`, sub: "追蹤中", col: "#f59e0b" },
           ].map((c, i) => (
             <div key={i} style={{ background: "#111", borderRadius: 8, padding: "7px 8px", border: "1px solid #1a1a1a" }}>
@@ -859,14 +920,25 @@ export default function App() {
           ))}
         </div>
 
+        {/* Ungrounded data warning */}
+        {stocks.length > 0 && !grounded && (
+          <div style={{ background: "#2a1510", border: "2px solid #f59e0b", borderRadius: 10, padding: 14, marginBottom: 12 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", marginBottom: 6 }}>⚠️ 股價未經查證</div>
+            <div style={{ fontSize: 14, color: "#ddd", lineHeight: 1.8 }}>
+              這次回應沒有使用 Google 搜尋，數字可能是 AI 依訓練資料推測的，<strong style={{ color: "#f59e0b" }}>不是即時股價</strong>。
+              請勿依此下單，務必到券商 App 或證交所確認真實價格。
+            </div>
+          </div>
+        )}
+
         {/* Settings panel */}
         {showSettings && <SettingsPanel apiKey={apiKey} onClose={() => setShowSettings(false)} />}
 
         {/* Tab content */}
         {tab === "search" && <TabDiagnosis watchlist={watchlist} apiKey={apiKey} />}
         {tab === "watchlist" && <TabWatchlist watchlist={watchlist} apiKey={apiKey} />}
-        {tab === "buy" && <TabScan mode="buy" watchlist={watchlist} apiKey={apiKey} />}
-        {tab === "sell" && <TabScan mode="sell" watchlist={watchlist} apiKey={apiKey} />}
+        {tab === "buy" && <TabScan mode="buy" watchlist={watchlist} apiKey={apiKey} scanState={scanState} />}
+        {tab === "sell" && <TabScan mode="sell" watchlist={watchlist} apiKey={apiKey} scanState={scanState} />}
 
         {/* Footer */}
         <div style={{ marginTop: 20, padding: 12, background: "#0d0d0d", borderRadius: 10, border: "1px solid #151515" }}>
