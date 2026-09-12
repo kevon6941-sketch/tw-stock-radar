@@ -223,33 +223,49 @@ async function fetchValuation() {
   return map;
 }
 
-// 個股近期日線（用於 K 線圖）
+// 個股近期日線（用於 K 線圖與技術指標）
 async function fetchStockHistory(code) {
-  const d = new Date();
-  const ym = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}01`;
-  const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${ym}&stockNo=${code}`;
-  for (const wrap of CORS_PROXIES) {
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 10000);
-      const r = await fetch(wrap(url), { signal: ctrl.signal });
-      clearTimeout(timer);
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      let txt = await r.text();
-      let j = JSON.parse(txt);
-      if (j && typeof j.contents === "string") j = JSON.parse(j.contents);
-      if (!j?.data?.length) throw new Error("無資料");
-      return j.data.map(row => ({
-        date: row[0],
-        open: parseFloat(row[3].replace(/,/g, "")),
-        high: parseFloat(row[4].replace(/,/g, "")),
-        low: parseFloat(row[5].replace(/,/g, "")),
-        close: parseFloat(row[6].replace(/,/g, "")),
-        volume: parseInt(row[1].replace(/,/g, "")) || 0,
-      })).filter(x => isFinite(x.close));
-    } catch {}
+  const now = new Date();
+  // 試本月，資料不足再補上個月
+  const months = [
+    new Date(now.getFullYear(), now.getMonth(), 1),
+    new Date(now.getFullYear(), now.getMonth() - 1, 1),
+  ];
+
+  const fetchMonth = async (dt) => {
+    const ym = `${dt.getFullYear()}${String(dt.getMonth() + 1).padStart(2, "0")}01`;
+    const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${ym}&stockNo=${code}`;
+    for (const wrap of CORS_PROXIES) {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 9000);
+        const r = await fetch(wrap(url), { signal: ctrl.signal });
+        clearTimeout(timer);
+        if (!r.ok) continue;
+        let txt = await r.text();
+        let j = JSON.parse(txt);
+        if (j && typeof j.contents === "string") j = JSON.parse(j.contents);
+        if (!j?.data?.length) continue;
+        return j.data.map(row => ({
+          date: row[0],
+          open: parseFloat(String(row[3]).replace(/,/g, "")),
+          high: parseFloat(String(row[4]).replace(/,/g, "")),
+          low: parseFloat(String(row[5]).replace(/,/g, "")),
+          close: parseFloat(String(row[6]).replace(/,/g, "")),
+          volume: parseInt(String(row[1]).replace(/,/g, "")) || 0,
+        })).filter(x => isFinite(x.close) && x.close > 0);
+      } catch {}
+    }
+    return [];
+  };
+
+  let out = await fetchMonth(months[0]);
+  if (out.length < 26) {
+    const prev = await fetchMonth(months[1]);
+    out = [...prev, ...out];
   }
-  throw new Error("無法取得歷史資料");
+  if (out.length === 0) throw new Error("無法取得歷史資料");
+  return out;
 }
 
 // --- 產業分類（依代號區間，台股編碼規則）---
@@ -1369,6 +1385,7 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
   const [deepResults, setDeepResults] = useState({});
   const [deepRunning, setDeepRunning] = useState(false);
   const [deepProgress, setDeepProgress] = useState({ done: 0, total: 0 });
+  const [deepError, setDeepError] = useState("");
   const [useDeep, setUseDeep] = useState(false);
 
   const verdictColors = { "強力買進": "#dc2626", "買進": "#ef4444", "觀望": "#f59e0b", "賣出": "#22c55e", "強力賣出": "#16a34a" };
@@ -1385,51 +1402,8 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
     setLoadingHist(null);
   };
 
-  const runDeepAnalysis = async () => {
-    setDeepRunning(true);
-    // 取當日訊號較明顯的前 40 檔做深度分析
-    const candidates = stocks
-      .filter(s => Math.abs(s.score ?? 0) >= 1.5)
-      .sort((a, b) => Math.abs(b.score ?? 0) - Math.abs(a.score ?? 0))
-      .slice(0, 40);
-
-    setDeepProgress({ done: 0, total: candidates.length });
-    const results = {};
-
-    // 分批並行，避免打爆代理
-    const BATCH = 4;
-    for (let i = 0; i < candidates.length; i += BATCH) {
-      const batch = candidates.slice(i, i + BATCH);
-      await Promise.all(batch.map(async (s) => {
-        try {
-          const hist = await fetchStockHistory(s.id);
-          const a = analyzeTechnical(hist);
-          if (a) {
-            results[s.id] = a;
-            setHistory(prev => ({ ...prev, [s.id]: hist.slice(-20) }));
-          }
-        } catch {}
-      }));
-      setDeepProgress({ done: Math.min(i + BATCH, candidates.length), total: candidates.length });
-      setDeepResults({ ...results });
-    }
-
-    setDeepResults(results);
-    setUseDeep(true);
-    setDeepRunning(false);
-  };
-
-  // 套用深度分析結果（若有）
-  const applyDeep = (s) => {
-    const d = deepResults[s.id];
-    if (useDeep && d) return { ...s, verdict: d.verdict, score: d.score, reason: d.reason, deep: d };
-    return s;
-  };
-
-  const matched = stocks.map(applyDeep).filter(s => {
-    if (useDeep && !deepResults[s.id]) return false;
-    if (mode === "buy" && !(s.verdict === "買進" || s.verdict === "強力買進")) return false;
-    if (mode === "sell" && !(s.verdict === "賣出" || s.verdict === "強力賣出")) return false;
+  // 共用篩選條件（不含深度分析）
+  const passFilters = (s) => {
     if (sector !== "全部" && getSector(s.id) !== sector) return false;
     if (theme !== "全部" && !getThemes(s.id).includes(theme)) return false;
     if (priceTier !== "all" && getPriceTier(s.price) !== priceTier) return false;
@@ -1444,6 +1418,80 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
     if (minDY > 0 && (!v?.dy || v.dy < minDY)) return false;
     if (maxPB > 0 && (!v?.pb || v.pb > maxPB || v.pb <= 0)) return false;
     return true;
+  };
+
+  // 快篩結果（深度分析的候選來源）
+  const matchedRaw = stocks.filter(s => {
+    if (mode === "buy" && !(s.verdict === "買進" || s.verdict === "強力買進")) return false;
+    if (mode === "sell" && !(s.verdict === "賣出" || s.verdict === "強力賣出")) return false;
+    return passFilters(s);
+  }).sort((a, b) => {
+    const as = Math.abs(a.score ?? 0), bs = Math.abs(b.score ?? 0);
+    return bs - as;
+  });
+
+  const runDeepAnalysis = async () => {
+    setDeepRunning(true);
+    setDeepError("");
+
+    // 直接分析目前清單上的股票（最多 40 檔）
+    const candidates = matchedRaw.slice(0, 40);
+
+    if (candidates.length === 0) {
+      setDeepError("清單上沒有股票可分析");
+      setDeepRunning(false);
+      return;
+    }
+
+    setDeepProgress({ done: 0, total: candidates.length });
+    const results = {};
+    let failed = 0;
+
+    const BATCH = 3;
+    for (let i = 0; i < candidates.length; i += BATCH) {
+      const batch = candidates.slice(i, i + BATCH);
+      await Promise.all(batch.map(async (s) => {
+        try {
+          const hist = await fetchStockHistory(s.id);
+          const a = analyzeTechnical(hist);
+          if (a) {
+            results[s.id] = a;
+            setHistory(prev => ({ ...prev, [s.id]: hist.slice(-20) }));
+          } else {
+            failed++;
+          }
+        } catch {
+          failed++;
+        }
+      }));
+      setDeepProgress({ done: Math.min(i + BATCH, candidates.length), total: candidates.length });
+      setDeepResults({ ...results });
+    }
+
+    setDeepResults(results);
+    const okCount = Object.keys(results).length;
+    if (okCount === 0) {
+      setDeepError(`全部 ${candidates.length} 檔都抓不到歷史資料，可能是代理伺服器不穩，請稍後再試`);
+      setUseDeep(false);
+    } else {
+      if (failed > 0) setDeepError(`${okCount} 檔成功、${failed} 檔失敗（歷史資料抓取不穩定）`);
+      setUseDeep(true);
+    }
+    setDeepRunning(false);
+  };
+
+  // 套用深度分析結果（若有）
+  const applyDeep = (s) => {
+    const d = deepResults[s.id];
+    if (useDeep && d) return { ...s, verdict: d.verdict, score: d.score, reason: d.reason, deep: d };
+    return s;
+  };
+
+  const matched = stocks.map(applyDeep).filter(s => {
+    if (useDeep && !deepResults[s.id]) return false;
+    if (mode === "buy" && !(s.verdict === "買進" || s.verdict === "強力買進")) return false;
+    if (mode === "sell" && !(s.verdict === "賣出" || s.verdict === "強力賣出")) return false;
+    return passFilters(s);
   }).sort((a, b) => {
     const as = a.score ?? 0, bs = b.score ?? 0;
     return mode === "buy" ? bs - as : as - bs;
@@ -1508,7 +1556,7 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
                 <div style={{ fontSize: 12, color: "#999", marginTop: 2, lineHeight: 1.6 }}>
                   {useDeep
                     ? `已分析 ${Object.keys(deepResults).length} 檔：均線排列、KD、RSI、MACD、量價`
-                    : "僅看今日漲跌與K棒型態，容易追高，建議跑深度分析"}
+                    : `將分析清單前 ${Math.min(matchedRaw.length, 40)} 檔，計算均線、KD、RSI、MACD`}
                 </div>
               </div>
               {!deepRunning && (
@@ -1533,6 +1581,11 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
                 <div style={{ height: 5, background: "#1a1a1a", borderRadius: 3 }}>
                   <div style={{ height: 5, borderRadius: 3, background: "linear-gradient(90deg,#f59e0b,#22c55e)", width: `${deepProgress.total ? (deepProgress.done / deepProgress.total) * 100 : 0}%`, transition: "width 0.3s" }} />
                 </div>
+              </div>
+            )}
+            {deepError && !deepRunning && (
+              <div style={{ marginTop: 8, padding: "8px 10px", background: "#2a1510", borderRadius: 6, fontSize: 13, color: "#fcd34d", lineHeight: 1.6 }}>
+                {deepError}
               </div>
             )}
           </div>
