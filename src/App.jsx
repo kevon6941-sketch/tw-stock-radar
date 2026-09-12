@@ -109,21 +109,42 @@ function useWatchlist() {
 const CORS_PROXIES = [
   (u) => u,                                                        // 直連
   (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-  (u) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
-  (u) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
-  (u) => `https://thingproxy.freeboard.io/fetch/${u}`,
+  (u) => `https://api.cors.lol/?url=${encodeURIComponent(u)}`,
+  (u) => `https://proxy.cors.sh/${u}`,
+  (u) => `https://whateverorigin.org/get?url=${encodeURIComponent(u)}`,
+  (u) => `https://api.codetabs.com/v1/proxy/?quest=${u}`,
+  (u) => `https://cors-anywhere.herokuapp.com/${u}`,
 ];
 
-async function fetchTWSE(url) {
+async function fetchTWSE(url, localFile) {
   const errs = [];
+
+  // 1. 優先讀本站快取（GitHub Action 每日更新，無 CORS 問題）
+  if (localFile) {
+    try {
+      const base = import.meta.env.BASE_URL || "/";
+      const r = await fetch(`${base}data/${localFile}`);
+      if (r.ok) {
+        const json = await r.json();
+        if (Array.isArray(json) && json.length) return json;
+      }
+    } catch (e) { errs.push("快取:" + e.message); }
+  }
+
+  // 2. 退而求其次，試各種 CORS 代理抓即時資料
   for (const wrap of CORS_PROXIES) {
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 12000);
-      const r = await fetch(wrap(url), { signal: ctrl.signal });
+      const timer = setTimeout(() => ctrl.abort(), 10000);
+      const r = await fetch(wrap(url), { signal: ctrl.signal, headers: { "Accept": "application/json" } });
       clearTimeout(timer);
       if (!r.ok) throw new Error("HTTP " + r.status);
-      const txt = await r.text();
+      let txt = await r.text();
+      try {
+        const maybe = JSON.parse(txt);
+        if (maybe && typeof maybe.contents === "string") txt = maybe.contents;
+        else if (Array.isArray(maybe) && maybe.length) return maybe;
+      } catch {}
       const json = JSON.parse(txt);
       if (!Array.isArray(json) || json.length === 0) throw new Error("空資料");
       return json;
@@ -131,12 +152,12 @@ async function fetchTWSE(url) {
       errs.push(e.name === "AbortError" ? "逾時" : e.message);
     }
   }
-  throw new Error("證交所連線失敗（" + errs.join(" / ") + "）");
+  throw new Error("無法取得證交所資料（" + errs.join(" / ") + "）");
 }
 
 // 全上市個股當日收盤行情
 async function fetchAllStockPrices() {
-  const rows = await fetchTWSE("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL");
+  const rows = await fetchTWSE("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", "stock_day_all.json");
   const map = {};
   for (const r of rows) {
     const code = r.Code || r.證券代號;
@@ -163,7 +184,7 @@ async function fetchAllStockPrices() {
 
 // 加權指數
 async function fetchTaiex() {
-  const rows = await fetchTWSE("https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX");
+  const rows = await fetchTWSE("https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX", "mi_index.json");
   const row = rows.find(r => (r.指數 || r.Index || "").includes("發行量加權股價指數"));
   if (!row) return null;
   const close = row.收盤指數 || row.ClosingIndex;
