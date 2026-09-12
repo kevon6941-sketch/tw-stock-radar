@@ -38,13 +38,21 @@ function ScoreRing({ score, label, size = 48 }) {
   const offset = circ - (pct / 100) * circ;
   const col = pct >= 70 ? "#22c55e" : pct >= 40 ? "#f59e0b" : "#ef4444";
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
-        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#222" strokeWidth="4" />
-        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={col} strokeWidth="4" strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.5s" }} />
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <g transform={`rotate(-90 ${size/2} ${size/2})`}>
+          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#222" strokeWidth="4" />
+          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={col} strokeWidth="4"
+            strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round"
+            style={{ transition: "stroke-dashoffset 0.5s" }} />
+        </g>
+        <text x={size/2} y={size/2} textAnchor="middle" dominantBaseline="central"
+          fill={col} fontSize={size * 0.34} fontWeight="700"
+          fontFamily="'Inter', 'Noto Sans TC', system-ui, sans-serif">
+          {pct}
+        </text>
       </svg>
-      <div style={{ position: "relative", marginTop: -(size/2 + 8), fontSize: 17, fontWeight: 700, color: col, textAlign: "center", lineHeight: `${size}px`, height: size }}>{pct}</div>
-      <div style={{ fontSize: 13, color: "#ccc", marginTop: -4 }}>{label}</div>
+      <div style={{ fontSize: 13, color: "#ccc" }}>{label}</div>
     </div>
   );
 }
@@ -609,10 +617,24 @@ function TabDiagnosis({ watchlist, apiKey }) {
 
           {/* Financial Score Rings */}
           {result.finScores && Object.keys(result.finScores).length > 0 && (
-            <div style={{ display: "flex", justifyContent: "space-around", padding: "12px 0", marginBottom: 12, background: "#0d0d0d", borderRadius: 10, border: "1px solid #1a1a1a" }}>
-              {[["revenue","營收"], ["eps","EPS"], ["margin","毛利"], ["roe","ROE"], ["debt","體質"]].map(([k, l]) => (
-                <ScoreRing key={k} score={result.finScores[k] || 50} label={l} />
-              ))}
+            <div style={{ padding: "14px 10px 12px", marginBottom: 12, background: "#0d0d0d", borderRadius: 10, border: "1px solid #1a1a1a" }}>
+              <div style={{ fontSize: 14, color: "#aaa", marginBottom: 10, paddingLeft: 4 }}>📊 財報健檢評分</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4 }}>
+                {[
+                  ["revenue", "營收", "營收成長力"],
+                  ["eps", "EPS", "每股盈餘"],
+                  ["margin", "毛利", "毛利率"],
+                  ["roe", "ROE", "股東權益報酬率"],
+                  ["debt", "體質", "財務健全度"],
+                ].map(([k, l, full]) => (
+                  <div key={k} title={full} style={{ display: "flex", justifyContent: "center" }}>
+                    <ScoreRing score={result.finScores[k] || 50} label={l} size={56} />
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, color: "#888", marginTop: 8, textAlign: "center" }}>
+                分數越高越好 · 70以上綠燈、40以下紅燈
+              </div>
             </div>
           )}
 
@@ -673,39 +695,59 @@ function TabDiagnosis({ watchlist, apiKey }) {
 // ====================================
 // TAB 2: 自選股追蹤
 // ====================================
-function TabWatchlist({ watchlist, apiKey }) {
+function TabWatchlist({ watchlist, apiKey, priceMap, onRefreshPrices }) {
   const [refreshing, setRefreshing] = useState(null);
-
-  const refresh = async (item) => {
-    setRefreshing(item.id);
-    try {
-      const { text, grounded } = await callAI(`你是台股分析師。請搜尋「${item.name || item.id}」的最新股價與今日漲跌幅，以及目前該買進還是賣出。
-
-用以下格式簡短回答（繁體中文）：
-💰 [股價] 元（[漲跌幅%]）
-🎯 判定：【買進/賣出/觀望】
-📝 [一句話理由]`, apiKey.key, apiKey.provider);
-      const verdict = parseVerdict(text);
-      watchlist.update(item.id, { latestInfo: text, verdict, lastRefresh: new Date().toISOString() });
-    } catch {}
-    setRefreshing(null);
-  };
-
-  const refreshAll = async () => {
-    for (const item of watchlist.list) {
-      await refresh(item);
-    }
-  };
+  const [expanded, setExpanded] = useState(null);
+  const [aiInfo, setAiInfo] = useState({});
 
   const verdictColors = { "強力買進": "#dc2626", "買進": "#ef4444", "觀望": "#f59e0b", "賣出": "#22c55e", "強力賣出": "#16a34a" };
+
+  // 用證交所即時資料算出每檔的最新狀態
+  const enriched = watchlist.list.map(item => {
+    const p = priceMap?.[item.id];
+    if (!p) return { ...item, live: null };
+    const v = calcVerdict(p);
+    return {
+      ...item,
+      live: {
+        price: p.close,
+        pct: p.pct,
+        change: p.change,
+        open: p.open, high: p.high, low: p.low, volume: p.volume,
+        verdict: v.verdict,
+        reason: v.reason,
+      },
+    };
+  });
+
+  const askAI = async (item) => {
+    if (!apiKey.hasKey) return;
+    setRefreshing(item.id);
+    try {
+      const p = priceMap?.[item.id];
+      const ctx = p ? `證交所今日資料：收盤${p.close} 開${p.open} 高${p.high} 低${p.low} 漲跌${p.change} (${p.pct?.toFixed(2)}%) 量${Math.round(p.volume/1000)}張` : "";
+      const { text } = await callAI(`你是台股分析師。請分析「${item.name || item.id}」這檔股票。
+${ctx}
+
+請簡潔回答（繁體中文，200字內）：
+📈 技術面：[目前趨勢與關鍵價位]
+🏦 籌碼面：[法人動向，若查得到]
+⚡ 近期題材：[重要利多或利空]
+🎯 操作建議：[具體怎麼做，含停損參考]`, apiKey.key, apiKey.provider);
+      setAiInfo(prev => ({ ...prev, [item.id]: { text, time: new Date().toLocaleString("zh-TW") } }));
+    } catch (e) {
+      setAiInfo(prev => ({ ...prev, [item.id]: { text: "分析失敗：" + e.message, time: "" } }));
+    }
+    setRefreshing(null);
+  };
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
         <div style={{ fontSize: 18, fontWeight: 700 }}>⭐ 自選股追蹤 ({watchlist.list.length})</div>
-        {watchlist.list.length > 0 && (
-          <button onClick={refreshAll} style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #333", background: "#141414", color: "#f59e0b", fontSize: 15, cursor: "pointer" }}>
-            🔄 全部更新
+        {watchlist.list.length > 0 && onRefreshPrices && (
+          <button onClick={onRefreshPrices} style={{ padding: "5px 12px", borderRadius: 6, border: "1px solid #333", background: "#141414", color: "#f59e0b", fontSize: 14, cursor: "pointer" }}>
+            🔄 更新股價
           </button>
         )}
       </div>
@@ -714,42 +756,111 @@ function TabWatchlist({ watchlist, apiKey }) {
         <div style={{ padding: 40, textAlign: "center", background: "#111", borderRadius: 12, border: "1px solid #1e1e1e" }}>
           <div style={{ fontSize: 32, marginBottom: 10 }}>⭐</div>
           <div style={{ fontSize: 17, color: "#ccc", marginBottom: 4 }}>還沒有自選股</div>
-          <div style={{ fontSize: 15, color: "#aaa" }}>到「個股診斷」查詢後，點「加入自選股」即可追蹤</div>
+          <div style={{ fontSize: 15, color: "#aaa" }}>在「買進」「賣出」或「診斷」頁點「加入自選股」即可追蹤</div>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {watchlist.list.map(item => (
-            <div key={item.id} style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 10, padding: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 18, fontWeight: 700 }}>{item.name || item.id}</span>
-                  {item.verdict && (
-                    <span style={{ fontSize: 14, fontWeight: 600, padding: "2px 8px", borderRadius: 6, color: verdictColors[item.verdict] || "#888", background: (verdictColors[item.verdict] || "#888") + "15" }}>
-                      {item.verdict}
-                    </span>
-                  )}
+          {enriched.map(item => {
+            const open = expanded === item.id;
+            const live = item.live;
+            const verdict = live?.verdict || item.verdict || "觀望";
+            const vc = verdictColors[verdict] || "#888";
+            const isUp = live ? live.pct >= 0 : null;
+            const ai = aiInfo[item.id];
+            return (
+              <div key={item.id}
+                onClick={() => setExpanded(open ? null : item.id)}
+                style={{ background: open ? "#151515" : "#111", border: `1px solid ${open ? "#2a2a2a" : "#1e1e1e"}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
+
+                {/* 主列 */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: 3, background: vc, flexShrink: 0 }} />
+                  <div style={{ minWidth: 60 }}>
+                    <div style={{ fontSize: 17, fontWeight: 700 }}>{item.name || item.id}</div>
+                    <div style={{ fontSize: 13, color: "#999" }}>{item.id}</div>
+                  </div>
+                  <div style={{ flex: 1, textAlign: "right" }}>
+                    {live ? (
+                      <>
+                        <div style={{ fontSize: 20, fontWeight: 700, color: isUp ? "#ef4444" : "#22c55e" }}>{live.price.toFixed(2)}</div>
+                        <div style={{ fontSize: 14, color: isUp ? "#ef4444" : "#22c55e" }}>
+                          {isUp ? "+" : ""}{live.change?.toFixed(2)} ({isUp ? "+" : ""}{live.pct?.toFixed(2)}%)
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 14, color: "#888" }}>無今日資料</div>
+                    )}
+                  </div>
+                  <div style={{ padding: "4px 10px", borderRadius: 6, fontSize: 14, fontWeight: 600, background: vc + "18", color: vc, whiteSpace: "nowrap" }}>
+                    {verdict}
+                  </div>
                 </div>
-                <div style={{ display: "flex", gap: 4 }}>
-                  <button onClick={() => refresh(item)} disabled={refreshing === item.id}
-                    style={{ padding: "3px 8px", borderRadius: 4, border: "1px solid #222", background: "#0d0d0d", color: "#ddd", fontSize: 14, cursor: "pointer" }}>
-                    {refreshing === item.id ? "⏳" : "🔄"}
-                  </button>
-                  <button onClick={() => watchlist.remove(item.id)}
-                    style={{ padding: "3px 8px", borderRadius: 4, border: "1px solid #222", background: "#0d0d0d", color: "#bbb", fontSize: 14, cursor: "pointer" }}>✕</button>
-                </div>
+
+                {/* 展開詳細 */}
+                {open && (
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #1e1e1e" }} onClick={e => e.stopPropagation()}>
+                    {live ? (
+                      <>
+                        <div style={{ fontSize: 15, color: "#ccc", lineHeight: 1.8, marginBottom: 10 }}>
+                          📝 {live.reason || "當日無明顯訊號"}
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, marginBottom: 12 }}>
+                          {[["開盤", live.open], ["最高", live.high], ["最低", live.low], ["成交量", live.volume ? Math.round(live.volume/1000) + "張" : "—"]].map(([l, v]) => (
+                            <div key={l} style={{ background: "#0a0a0a", borderRadius: 6, padding: "7px 4px", textAlign: "center" }}>
+                              <div style={{ fontSize: 12, color: "#888" }}>{l}</div>
+                              <div style={{ fontSize: 15, fontWeight: 600, color: "#ddd" }}>{typeof v === "number" ? v.toFixed(2) : v}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {/* 當日區間視覺化 */}
+                        {live.high > live.low && (
+                          <div style={{ marginBottom: 12 }}>
+                            <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>當日價格區間</div>
+                            <div style={{ position: "relative", height: 8, background: "#1a1a1a", borderRadius: 4 }}>
+                              <div style={{
+                                position: "absolute", top: 0, height: 8, width: 3, borderRadius: 2, background: "#f97316",
+                                left: `${((live.price - live.low) / (live.high - live.low)) * 100}%`,
+                              }} />
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#999", marginTop: 3 }}>
+                              <span>{live.low?.toFixed(2)}</span>
+                              <span style={{ color: "#f97316" }}>收 {live.price.toFixed(2)}</span>
+                              <span>{live.high?.toFixed(2)}</span>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 15, color: "#999", marginBottom: 10 }}>
+                        今日無交易資料（可能是非交易日，或此代號不在上市清單中）
+                      </div>
+                    )}
+
+                    {/* AI 深度分析 */}
+                    {ai && (
+                      <div style={{ background: "#0a0a0a", borderRadius: 8, padding: 12, fontSize: 15, lineHeight: 1.9, color: "#bbb", whiteSpace: "pre-wrap", borderLeft: "3px solid #f97316", marginBottom: 10 }}>
+                        {ai.text}
+                        {ai.time && <div style={{ fontSize: 12, color: "#777", marginTop: 6 }}>{ai.time}</div>}
+                      </div>
+                    )}
+
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {apiKey.hasKey && (
+                        <button onClick={() => askAI(item)} disabled={refreshing === item.id}
+                          style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid #333", background: "#141414", color: "#f97316", fontSize: 14, cursor: "pointer" }}>
+                          {refreshing === item.id ? "分析中…" : ai ? "🔄 重新分析" : "🤖 AI 深度分析"}
+                        </button>
+                      )}
+                      <button onClick={() => watchlist.remove(item.id)}
+                        style={{ padding: "8px 14px", borderRadius: 6, border: "1px solid #333", background: "#141414", color: "#ef4444", fontSize: 14, cursor: "pointer" }}>
+                        移除
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-              {item.latestInfo && (
-                <div style={{ fontSize: 15, lineHeight: 1.7, color: "#aaa", whiteSpace: "pre-wrap", background: "#0a0a0a", borderRadius: 6, padding: 8 }}>
-                  {item.latestInfo}
-                </div>
-              )}
-              {item.lastRefresh && (
-                <div style={{ fontSize: 13, color: "#999", marginTop: 4 }}>
-                  上次更新：{new Date(item.lastRefresh).toLocaleString("zh-TW")}
-                </div>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -916,6 +1027,10 @@ export default function App() {
   const [rawText, setRawText] = useState("");
   const [lastScan, setLastScan] = useState(() => localStorage.getItem("tw-stock-scan-time") || "");
   const [grounded, setGrounded] = useState(() => localStorage.getItem("tw-stock-grounded") === "1");
+  const [priceMap, setPriceMap] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("tw-stock-pricemap")) || null; }
+    catch { return null; }
+  });
 
   // Market index
   const [index, setIndex] = useState(() => {
@@ -940,11 +1055,23 @@ export default function App() {
     setScanning(true); setScanError(""); setRawText("");
     try {
       // 1. 先從證交所抓真實股價
-      const priceMap = await fetchAllStockPrices();
+      const fullMap = await fetchAllStockPrices();
+
+      // 只保留掃描清單 + 自選股的資料（避免 localStorage 爆掉）
+      const keep = new Set([
+        ...SCAN_STOCKS.map(s => s.split(" ")[0]),
+        ...watchlist.list.map(w => w.id),
+      ]);
+      const slim = {};
+      keep.forEach(c => { if (fullMap[c]) slim[c] = fullMap[c]; });
+      setPriceMap(slim);
+      try { localStorage.setItem("tw-stock-pricemap", JSON.stringify(slim)); } catch {}
+
+      const priceMapLocal = fullMap;
       const rows = SCAN_STOCKS.map(s => {
         const code = s.split(" ")[0];
         const name = s.split(" ")[1];
-        const p = priceMap[code];
+        const p = priceMapLocal[code];
         return p ? { ...p, name: p.name || name } : { code, name, close: null };
       }).filter(r => r.close !== null);
 
@@ -1109,7 +1236,7 @@ ${dataLines}
 
         {/* Tab content */}
         {tab === "search" && <TabDiagnosis watchlist={watchlist} apiKey={apiKey} />}
-        {tab === "watchlist" && <TabWatchlist watchlist={watchlist} apiKey={apiKey} />}
+        {tab === "watchlist" && <TabWatchlist watchlist={watchlist} apiKey={apiKey} priceMap={priceMap} onRefreshPrices={scan} />}
         {tab === "buy" && <TabScan mode="buy" watchlist={watchlist} apiKey={apiKey} scanState={scanState} />}
         {tab === "sell" && <TabScan mode="sell" watchlist={watchlist} apiKey={apiKey} scanState={scanState} />}
 
