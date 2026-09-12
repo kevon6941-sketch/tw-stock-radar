@@ -200,6 +200,62 @@ async function fetchTaiex() {
   };
 }
 
+// --- 用證交所真實數據計算買賣訊號（不需 AI）---
+function calcVerdict(r) {
+  let score = 0;
+  const reasons = [];
+  const pct = r.pct ?? 0;
+  const range = (r.high && r.low) ? (r.high - r.low) : 0;
+  const pos = range > 0 ? (r.close - r.low) / range : 0.5;  // 收盤在當日區間位置
+
+  // 1. 漲跌幅
+  if (pct >= 5) { score += 2; reasons.push("強勢大漲"); }
+  else if (pct >= 2) { score += 1.5; reasons.push("明顯上漲"); }
+  else if (pct > 0) { score += 0.5; reasons.push("收紅"); }
+  else if (pct <= -5) { score -= 2; reasons.push("重挫"); }
+  else if (pct <= -2) { score -= 1.5; reasons.push("明顯下跌"); }
+  else if (pct < 0) { score -= 0.5; reasons.push("收黑"); }
+
+  // 2. 收盤位置（收在高檔代表買盤強）
+  if (pos >= 0.8) { score += 1.5; reasons.push("收最高附近"); }
+  else if (pos >= 0.6) { score += 0.5; reasons.push("收盤偏高"); }
+  else if (pos <= 0.2) { score -= 1.5; reasons.push("收最低附近"); }
+  else if (pos <= 0.4) { score -= 0.5; reasons.push("收盤偏低"); }
+
+  // 3. 開盤 vs 收盤（紅K / 黑K）
+  if (r.open && r.close > r.open) {
+    const body = ((r.close - r.open) / r.open) * 100;
+    if (body >= 2) { score += 1; reasons.push("長紅K棒"); }
+    else { score += 0.3; reasons.push("紅K"); }
+  } else if (r.open && r.close < r.open) {
+    const body = ((r.open - r.close) / r.open) * 100;
+    if (body >= 2) { score -= 1; reasons.push("長黑K棒"); }
+    else { score -= 0.3; reasons.push("黑K"); }
+  }
+
+  // 4. 跳空
+  if (r.open && r.close && r.change !== null) {
+    const prevClose = r.close - r.change;
+    if (r.low > prevClose) { score += 1; reasons.push("向上跳空"); }
+    else if (r.high < prevClose) { score -= 1; reasons.push("向下跳空"); }
+  }
+
+  // 5. 振幅過大警示
+  if (range > 0 && r.close > 0) {
+    const amp = (range / r.close) * 100;
+    if (amp >= 7) { score -= 0.5; reasons.push("振幅劇烈"); }
+  }
+
+  let verdict;
+  if (score >= 5) verdict = "強力買進";
+  else if (score >= 2.5) verdict = "買進";
+  else if (score > -2.5) verdict = "觀望";
+  else if (score > -5) verdict = "賣出";
+  else verdict = "強力賣出";
+
+  return { verdict, reason: reasons.slice(0, 3).join("、"), score };
+}
+
 // --- API Key management ---
 function useApiKey() {
   const [key, setKey] = useState(() => {
@@ -805,6 +861,16 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
                     <div style={{ fontSize: 15, color: "#ccc", lineHeight: 1.8, marginBottom: 8 }}>
                       📝 {stock.reason}
                     </div>
+                    {stock.open && (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, marginBottom: 10 }}>
+                        {[["開", stock.open], ["高", stock.high], ["低", stock.low], ["量", stock.volume ? Math.round(stock.volume / 1000) + "張" : "—"]].map(([l, v]) => (
+                          <div key={l} style={{ background: "#0a0a0a", borderRadius: 6, padding: "6px 4px", textAlign: "center" }}>
+                            <div style={{ fontSize: 12, color: "#888" }}>{l}</div>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: "#ddd" }}>{typeof v === "number" ? v.toFixed(2) : v}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <button onClick={() => watchlist.add({ id: stock.id, name: stock.name, verdict: stock.verdict })}
                       disabled={watchlist.has(stock.id)}
                       style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #333", background: "#141414", color: watchlist.has(stock.id) ? "#666" : "#f59e0b", fontSize: 14, cursor: "pointer" }}>
@@ -823,7 +889,7 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
         <div style={{ padding: 40, textAlign: "center", background: "#111", borderRadius: 12, border: "1px solid #1e1e1e" }}>
           <div style={{ fontSize: 32, marginBottom: 10 }}>{mode === "buy" ? "📈" : "📉"}</div>
           <div style={{ fontSize: 16, color: "#ccc", marginBottom: 6 }}>尚未掃描</div>
-          <div style={{ fontSize: 14, color: "#999" }}>點上方「開始掃描」，AI 會即時分析 16 檔熱門股的買賣訊號</div>
+          <div style={{ fontSize: 14, color: "#999" }}>點上方「開始掃描」，從證交所抓取 16 檔熱門股的真實收盤資料</div>
         </div>
       )}
     </div>
@@ -888,16 +954,20 @@ export default function App() {
         return;
       }
 
-      // 2. 先用真實股價建立基本結果（即使沒 API Key 也能看）
-      const base = rows.map(r => ({
-        id: r.code,
-        name: r.name,
-        price: r.close.toFixed(2),
-        change: (r.pct >= 0 ? "+" : "") + (r.pct?.toFixed(2) ?? "0") + "%",
-        verdict: "觀望",
-        reason: "",
-        sector: "",
-      }));
+      // 2. 用真實數據計算買賣訊號（不需 API Key）
+      const base = rows.map(r => {
+        const v = calcVerdict(r);
+        return {
+          id: r.code,
+          name: r.name,
+          price: r.close.toFixed(2),
+          change: (r.pct >= 0 ? "+" : "") + (r.pct?.toFixed(2) ?? "0") + "%",
+          verdict: v.verdict,
+          reason: v.reason,
+          sector: "",
+          open: r.open, high: r.high, low: r.low, volume: r.volume,
+        };
+      });
       setStocks(base);
       setGrounded(true);
 
@@ -1029,8 +1099,8 @@ ${dataLines}
         {/* Data source badge */}
         {stocks.length > 0 && (
           <div style={{ background: "#0d1f0d", border: "1px solid #16a34a44", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 13, color: "#86efac" }}>
-            ✅ 股價來自臺灣證券交易所官方 OpenAPI（每日約 16:00 更新收盤資料）
-            {!apiKey.hasKey && <span style={{ color: "#f59e0b" }}>　·　設定 ⚙️ API Key 可加上 AI 買賣判定</span>}
+            ✅ 資料來自臺灣證券交易所官方 OpenAPI，訊號依當日開高低收與量能計算
+            {!apiKey.hasKey && <span style={{ color: "#f59e0b" }}>　·　設定 ⚙️ API Key 可加上 AI 深度解讀</span>}
           </div>
         )}
 
