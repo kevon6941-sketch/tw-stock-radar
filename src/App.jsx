@@ -873,21 +873,29 @@ ${ctx}
 const SCAN_STOCKS = ["2330 台積電", "2317 鴻海", "2454 聯發科", "2382 廣達", "3231 緯創", "2308 台達電", "2881 富邦金", "2882 國泰金", "2603 長榮", "3661 世芯-KY", "2345 智邦", "6669 緯穎", "2357 華碩", "2409 友達", "2002 中鋼", "6770 力積電"];
 
 function TabScan({ mode, watchlist, apiKey, scanState }) {
-  const { stocks, scanning: loading, scanError: progress, rawText, lastScan, scan } = scanState;
+  const { stocks, scanning: loading, scanError: progress, rawText, lastScan, scan, scanCount } = scanState;
   const [selected, setSelected] = useState(null);
-
+  const [search, setSearch] = useState("");
+  const [limit, setLimit] = useState(50);
 
   const verdictColors = { "強力買進": "#dc2626", "買進": "#ef4444", "觀望": "#f59e0b", "賣出": "#22c55e", "強力賣出": "#16a34a" };
-  const verdictScore = { "強力買進": 5, "買進": 4, "觀望": 3, "賣出": 2, "強力賣出": 1 };
 
-  const filtered = stocks.filter(s => {
-    if (mode === "buy" && (s.verdict === "賣出" || s.verdict === "強力賣出")) return false;
-    if (mode === "sell" && (s.verdict === "買進" || s.verdict === "強力買進" || s.verdict === "觀望")) return false;
+  const matched = stocks.filter(s => {
+    // 只顯示有明確訊號的（過濾掉觀望）
+    if (mode === "buy" && !(s.verdict === "買進" || s.verdict === "強力買進")) return false;
+    if (mode === "sell" && !(s.verdict === "賣出" || s.verdict === "強力賣出")) return false;
+    if (search) {
+      const q = search.trim();
+      if (!s.name?.includes(q) && !s.id?.includes(q)) return false;
+    }
     return true;
   }).sort((a, b) => {
-    if (mode === "buy") return (verdictScore[b.verdict] || 0) - (verdictScore[a.verdict] || 0);
-    return (verdictScore[a.verdict] || 0) - (verdictScore[b.verdict] || 0);
+    // 依訊號強度排序：買進由強到弱，賣出由弱到強
+    const as = a.score ?? 0, bs = b.score ?? 0;
+    return mode === "buy" ? bs - as : as - bs;
   });
+
+  const filtered = matched.slice(0, limit);
 
   const buyCount = stocks.filter(s => s.verdict === "買進" || s.verdict === "強力買進").length;
   const sellCount = stocks.filter(s => s.verdict === "賣出" || s.verdict === "強力賣出").length;
@@ -899,9 +907,13 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
         <div>
           <div style={{ fontSize: 18, fontWeight: 700 }}>
             {mode === "buy" ? "📈 可買進" : "📉 應賣出"}
-            {stocks.length > 0 && <span style={{ fontSize: 15, color: "#999", marginLeft: 8 }}>({filtered.length} 檔)</span>}
+            {matched.length > 0 && <span style={{ fontSize: 15, color: "#999", marginLeft: 8 }}>{matched.length} 檔</span>}
           </div>
-          {lastScan && <div style={{ fontSize: 13, color: "#999", marginTop: 2 }}>上次掃描：{lastScan}</div>}
+          {lastScan && (
+            <div style={{ fontSize: 13, color: "#999", marginTop: 2 }}>
+              {scanCount ? `已掃 ${scanCount} 檔 · ` : ""}{lastScan}
+            </div>
+          )}
         </div>
         <button onClick={scan} disabled={loading}
           style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: loading ? "#333" : "linear-gradient(135deg, #ef4444, #f97316)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: loading ? "wait" : "pointer" }}>
@@ -909,14 +921,20 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
         </button>
       </div>
 
+      {/* Search */}
+      {stocks.length > 0 && (
+        <input value={search} onChange={e => { setSearch(e.target.value); setLimit(50); }}
+          placeholder="搜尋代號或名稱"
+          style={{ width: "100%", background: "#111", border: "1px solid #1e1e1e", borderRadius: 8, padding: "9px 12px", color: "#e5e5e5", fontSize: 15, outline: "none", marginBottom: 10, boxSizing: "border-box" }} />
+      )}
 
 
       {/* Loading */}
       {loading && (
         <div style={{ padding: 36, textAlign: "center", background: "#111", borderRadius: 12, border: "1px solid #1e1e1e" }}>
           <div style={{ display: "inline-block", width: 36, height: 36, border: "3px solid #222", borderTopColor: "#ef4444", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-          <div style={{ marginTop: 12, fontSize: 15, color: "#ccc" }}>AI 正在掃描 16 檔熱門股…</div>
-          <div style={{ marginTop: 4, fontSize: 13, color: "#999" }}>搜尋最新股價、分析買賣訊號中</div>
+          <div style={{ marginTop: 12, fontSize: 15, color: "#ccc" }}>正在掃描全市場…</div>
+          <div style={{ marginTop: 4, fontSize: 13, color: "#999" }}>從證交所讀取全市場資料並計算訊號</div>
           <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
         </div>
       )}
@@ -992,6 +1010,12 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
               </div>
             );
           })}
+          {matched.length > filtered.length && (
+            <button onClick={() => setLimit(l => l + 50)}
+              style={{ padding: "12px 0", borderRadius: 10, border: "1px solid #2a2a2a", background: "#111", color: "#f97316", fontSize: 15, fontWeight: 600, cursor: "pointer", marginTop: 4 }}>
+              載入更多（還有 {matched.length - filtered.length} 檔）
+            </button>
+          )}
         </div>
       )}
 
@@ -1000,7 +1024,7 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
         <div style={{ padding: 40, textAlign: "center", background: "#111", borderRadius: 12, border: "1px solid #1e1e1e" }}>
           <div style={{ fontSize: 32, marginBottom: 10 }}>{mode === "buy" ? "📈" : "📉"}</div>
           <div style={{ fontSize: 16, color: "#ccc", marginBottom: 6 }}>尚未掃描</div>
-          <div style={{ fontSize: 14, color: "#999" }}>點上方「開始掃描」，從證交所抓取 16 檔熱門股的真實收盤資料</div>
+          <div style={{ fontSize: 14, color: "#999" }}>點上方「開始掃描」，分析全上市約 1000 檔股票的真實收盤資料</div>
         </div>
       )}
     </div>
@@ -1027,6 +1051,7 @@ export default function App() {
   const [rawText, setRawText] = useState("");
   const [lastScan, setLastScan] = useState(() => localStorage.getItem("tw-stock-scan-time") || "");
   const [grounded, setGrounded] = useState(() => localStorage.getItem("tw-stock-grounded") === "1");
+  const [scanCount, setScanCount] = useState(() => parseInt(localStorage.getItem("tw-stock-count")) || 0);
   const [priceMap, setPriceMap] = useState(() => {
     try { return JSON.parse(localStorage.getItem("tw-stock-pricemap")) || null; }
     catch { return null; }
@@ -1054,35 +1079,27 @@ export default function App() {
     if (scanning) return;
     setScanning(true); setScanError(""); setRawText("");
     try {
-      // 1. 先從證交所抓真實股價
+      // 1. 從證交所抓全市場真實股價
       const fullMap = await fetchAllStockPrices();
+      const all = Object.values(fullMap);
 
-      // 只保留掃描清單 + 自選股的資料（避免 localStorage 爆掉）
-      const keep = new Set([
-        ...SCAN_STOCKS.map(s => s.split(" ")[0]),
-        ...watchlist.list.map(w => w.id),
-      ]);
-      const slim = {};
-      keep.forEach(c => { if (fullMap[c]) slim[c] = fullMap[c]; });
-      setPriceMap(slim);
-      try { localStorage.setItem("tw-stock-pricemap", JSON.stringify(slim)); } catch {}
+      // 2. 過濾：只留有流動性、正常價格的個股（排除權證、ETF零股等）
+      const MIN_VOLUME = 500000;   // 至少 500 張成交量
+      const tradable = all.filter(r =>
+        /^[1-9]\d{3}$/.test(r.code) &&    // 四碼純數字（排除權證、ETN）
+        r.close > 0 &&
+        r.volume >= MIN_VOLUME &&
+        r.high && r.low
+      );
 
-      const priceMapLocal = fullMap;
-      const rows = SCAN_STOCKS.map(s => {
-        const code = s.split(" ")[0];
-        const name = s.split(" ")[1];
-        const p = priceMapLocal[code];
-        return p ? { ...p, name: p.name || name } : { code, name, close: null };
-      }).filter(r => r.close !== null);
-
-      if (rows.length === 0) {
+      if (tradable.length === 0) {
         setScanError("證交所尚無今日資料（可能未開盤或非交易日）");
         setScanning(false);
         return;
       }
 
-      // 2. 用真實數據計算買賣訊號（不需 API Key）
-      const base = rows.map(r => {
+      // 3. 全部計算訊號
+      const scored = tradable.map(r => {
         const v = calcVerdict(r);
         return {
           id: r.code,
@@ -1091,56 +1108,28 @@ export default function App() {
           change: (r.pct >= 0 ? "+" : "") + (r.pct?.toFixed(2) ?? "0") + "%",
           verdict: v.verdict,
           reason: v.reason,
+          score: v.score,
           sector: "",
           open: r.open, high: r.high, low: r.low, volume: r.volume,
         };
       });
-      setStocks(base);
+
+      setStocks(scored);
       setGrounded(true);
+      setScanCount(tradable.length);
 
-      // 3. 有 API Key 的話，請 AI 根據真實數據給判定
-      if (apiKey.hasKey) {
-        const dataLines = rows.map(r =>
-          `${r.code} ${r.name} 收盤${r.close} 開${r.open} 高${r.high} 低${r.low} 漲跌${r.change >= 0 ? "+" : ""}${r.change} (${r.pct?.toFixed(2)}%) 量${Math.round(r.volume / 1000)}張`
-        ).join("\n");
+      // 保留自選股的完整資料供追蹤頁使用
+      const keep = new Set(watchlist.list.map(w => w.id));
+      const slim = {};
+      keep.forEach(c => { if (fullMap[c]) slim[c] = fullMap[c]; });
+      setPriceMap(slim);
+      try { localStorage.setItem("tw-stock-pricemap", JSON.stringify(slim)); } catch {}
 
-        const { text } = await callAI(`以下是台灣證交所今日官方收盤資料，請根據這些真實數據給出買賣判定。
-
-${dataLines}
-
-輸出規則：每檔一行，欄位用半形直線 | 分隔，不要加編號或項目符號，不要其他說明文字。
-格式：代號|判定|理由|產業
-
-判定只能填：強力買進、買進、觀望、賣出、強力賣出
-理由用一句話（20字內），根據當日漲跌幅、開高低收型態、成交量來判斷
-
-直接輸出 ${rows.length} 行：`, apiKey.key, apiKey.provider);
-
-        setRawText(text);
-        const verdicts = ["強力買進", "強力賣出", "買進", "賣出", "觀望"];
-        const aiMap = {};
-        for (let rawLine of text.split("\n")) {
-          let line = rawLine.trim();
-          if (!line.includes("|")) continue;
-          line = line.replace(/^[\s\-\*>#`]+/, "").replace(/^\|/, "").replace(/\|$/, "").trim();
-          const parts = line.split("|").map(s => s.replace(/\*\*/g, "").trim());
-          const code = (parts[0].match(/\d{4}/) || [])[0];
-          if (!code) continue;
-          let verdict = "觀望", vi = -1;
-          for (let i = 0; i < parts.length; i++) {
-            const f = verdicts.find(v => parts[i].includes(v));
-            if (f) { verdict = f; vi = i; break; }
-          }
-          aiMap[code] = { verdict, reason: vi >= 0 ? (parts[vi + 1] || "") : "", sector: vi >= 0 ? (parts[vi + 2] || "") : "" };
-        }
-        const merged = base.map(b => aiMap[b.id] ? { ...b, ...aiMap[b.id] } : b);
-        setStocks(merged);
-        localStorage.setItem("tw-stock-scan", JSON.stringify(merged));
-      } else {
-        localStorage.setItem("tw-stock-scan", JSON.stringify(base));
-      }
-
+      // localStorage 只存訊號較強的，避免爆容量
+      const toSave = scored.filter(s => Math.abs(s.score) >= 2.5).slice(0, 300);
+      try { localStorage.setItem("tw-stock-scan", JSON.stringify(toSave)); } catch {}
       localStorage.setItem("tw-stock-grounded", "1");
+      localStorage.setItem("tw-stock-count", String(tradable.length));
       const t = new Date().toLocaleString("zh-TW");
       setLastScan(t);
       localStorage.setItem("tw-stock-scan-time", t);
@@ -1157,7 +1146,7 @@ ${dataLines}
     if (!index || stale) fetchIndex();
   }, [apiKey.hasKey]);
 
-  const scanState = { stocks, scanning, scanError, rawText, lastScan, scan };
+  const scanState = { stocks, scanning, scanError, rawText, lastScan, scan, scanCount };
   const buyCount = stocks.filter(s => s.verdict === "買進" || s.verdict === "強力買進").length;
   const sellCount = stocks.filter(s => s.verdict === "賣出" || s.verdict === "強力賣出").length;
 
@@ -1194,8 +1183,8 @@ ${dataLines}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, margin: "12px 0" }}>
           {[
             { label: "加權指數", val: index?.value || "—", sub: index ? `${index.change} (${index.pct})` : (apiKey.hasKey ? "查詢中…" : "需設定 Key"), col: index?.pct?.startsWith("-") ? "#22c55e" : "#ef4444" },
-            { label: "可買進", val: stocks.length ? `${buyCount}` : "—", sub: stocks.length ? "檔" : (scanning ? "掃描中…" : "待掃描"), col: "#ef4444" },
-            { label: "應賣出", val: stocks.length ? `${sellCount}` : "—", sub: stocks.length ? "檔" : (scanning ? "掃描中…" : "待掃描"), col: "#22c55e" },
+            { label: "可買進", val: stocks.length ? `${buyCount}` : "—", sub: stocks.length ? `/ ${scanCount} 檔` : (scanning ? "掃描中…" : "待掃描"), col: "#ef4444" },
+            { label: "應賣出", val: stocks.length ? `${sellCount}` : "—", sub: stocks.length ? `/ ${scanCount} 檔` : (scanning ? "掃描中…" : "待掃描"), col: "#22c55e" },
             { label: "自選股", val: `${watchlist.list.length}`, sub: "追蹤中", col: "#f59e0b" },
           ].map((c, i) => (
             <div key={i} style={{ background: "#111", borderRadius: 8, padding: "7px 8px", border: "1px solid #1a1a1a" }}>
