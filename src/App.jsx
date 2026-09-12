@@ -3,18 +3,17 @@ import { useState, useEffect, useRef, useCallback } from "react";
 // --- Verdict Card ---
 function VerdictCard({ verdict, stockName, price, change }) {
   const map = {
-    "強力買進": { icon: "🔥", bg: "linear-gradient(135deg, #7f1d1d, #991b1b)", border: "#dc2626", color: "#fca5a5", sub: "技術面與籌碼面高度偏多，短線有強勢上攻動能" },
-    "買進": { icon: "📈", bg: "linear-gradient(135deg, #1a1a1a, #2a1515)", border: "#ef4444", color: "#ef4444", sub: "多項指標偏多，可考慮逢低分批佈局" },
-    "觀望": { icon: "⏸️", bg: "linear-gradient(135deg, #1a1a1a, #1a1a1a)", border: "#f59e0b", color: "#f59e0b", sub: "多空訊號交雜，建議等待方向明確再進場" },
-    "賣出": { icon: "📉", bg: "linear-gradient(135deg, #1a1a1a, #0d1f0d)", border: "#22c55e", color: "#22c55e", sub: "技術面轉弱或估值偏高，可考慮獲利了結或減碼" },
-    "強力賣出": { icon: "🚨", bg: "linear-gradient(135deg, #052e16, #14532d)", border: "#16a34a", color: "#86efac", sub: "多項指標高度偏空，建議盡速減碼避險" },
+    "強力買進": { bg: "linear-gradient(135deg, #7f1d1d, #991b1b)", border: "#dc2626", color: "#fca5a5", sub: "技術面與籌碼面高度偏多，短線有強勢上攻動能" },
+    "買進": { bg: "linear-gradient(135deg, #1a1a1a, #2a1515)", border: "#ef4444", color: "#ef4444", sub: "多項指標偏多，可考慮逢低分批佈局" },
+    "觀望": { bg: "linear-gradient(135deg, #1a1a1a, #1a1a1a)", border: "#f59e0b", color: "#f59e0b", sub: "多空訊號交雜，建議等待方向明確再進場" },
+    "賣出": { bg: "linear-gradient(135deg, #1a1a1a, #0d1f0d)", border: "#22c55e", color: "#22c55e", sub: "技術面轉弱或估值偏高，可考慮獲利了結或減碼" },
+    "強力賣出": { bg: "linear-gradient(135deg, #052e16, #14532d)", border: "#16a34a", color: "#86efac", sub: "多項指標高度偏空，建議盡速減碼避險" },
   };
   const v = map[verdict] || map["觀望"];
   return (
     <div style={{ background: v.bg, border: `2px solid ${v.border}`, borderRadius: 12, padding: "16px 16px 14px", marginBottom: 12 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 36 }}>{v.icon}</span>
+        <div>
           <div>
             <div style={{ fontSize: 14, color: "#ddd" }}>AI 診斷結論</div>
             <div style={{ fontSize: 30, fontWeight: 800, color: v.color, letterSpacing: 2 }}>{verdict}</div>
@@ -70,9 +69,9 @@ function parseVerdict(text) {
 }
 function parseStockInfo(text) {
   let stockName = null, price = null, change = null;
-  const nm = text.match(/(?:📊|股票|個股)[^\n]*?([^\s(（]+)\s*[（(](\d{4})[)）]/);
+  const nm = text.match(/(?:|股票|個股)[^\n]*?([^\s(（]+)\s*[（(](\d{4})[)）]/);
   if (nm) stockName = `${nm[1]} (${nm[2]})`;
-  const pm = text.match(/(?:💰|股價|收盤|最新)[^\n]*?(\d+(?:\.\d+)?)\s*元/);
+  const pm = text.match(/(?:|股價|收盤|最新)[^\n]*?(\d+(?:\.\d+)?)\s*元/);
   if (pm) price = pm[1] + " 元";
   const cm = text.match(/[漲跌][^\n]*?([+-]?\d+(?:\.\d+)?%)/);
   if (cm) change = cm[1];
@@ -206,6 +205,136 @@ async function fetchTaiex() {
     pct: (neg ? "-" : "+") + pct + "%",
     time: new Date().toLocaleString("zh-TW"),
   };
+}
+
+// 本益比、殖利率、股價淨值比
+async function fetchValuation() {
+  const rows = await fetchTWSE("https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL", "bwibbu_all.json");
+  const map = {};
+  for (const r of rows) {
+    const code = r.Code || r.證券代號;
+    if (!code) continue;
+    map[code] = {
+      pe: parseFloat(r.PEratio || r.本益比) || null,
+      dy: parseFloat(r.DividendYield || r.殖利率) || null,
+      pb: parseFloat(r.PBratio || r.股價淨值比) || null,
+    };
+  }
+  return map;
+}
+
+// 個股近期日線（用於 K 線圖）
+async function fetchStockHistory(code) {
+  const d = new Date();
+  const ym = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}01`;
+  const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${ym}&stockNo=${code}`;
+  for (const wrap of CORS_PROXIES) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 10000);
+      const r = await fetch(wrap(url), { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      let txt = await r.text();
+      let j = JSON.parse(txt);
+      if (j && typeof j.contents === "string") j = JSON.parse(j.contents);
+      if (!j?.data?.length) throw new Error("無資料");
+      return j.data.map(row => ({
+        date: row[0],
+        open: parseFloat(row[3].replace(/,/g, "")),
+        high: parseFloat(row[4].replace(/,/g, "")),
+        low: parseFloat(row[5].replace(/,/g, "")),
+        close: parseFloat(row[6].replace(/,/g, "")),
+        volume: parseInt(row[1].replace(/,/g, "")) || 0,
+      })).filter(x => isFinite(x.close));
+    } catch {}
+  }
+  throw new Error("無法取得歷史資料");
+}
+
+// --- 產業分類（依代號區間，台股編碼規則）---
+function getSector(code) {
+  const n = parseInt(code);
+  if (n >= 1100 && n <= 1110) return "水泥";
+  if (n >= 1201 && n <= 1240) return "食品";
+  if (n >= 1301 && n <= 1338) return "塑膠";
+  if (n >= 1401 && n <= 1479) return "紡織";
+  if (n >= 1503 && n <= 1591) return "電機機械";
+  if (n >= 1603 && n <= 1618) return "電器電纜";
+  if (n >= 1701 && n <= 1795) return "生技醫療";
+  if (n >= 1802 && n <= 1815) return "玻璃陶瓷";
+  if (n >= 1901 && n <= 1909) return "造紙";
+  if (n >= 2002 && n <= 2069) return "鋼鐵";
+  if (n >= 2101 && n <= 2114) return "橡膠";
+  if (n >= 2201 && n <= 2247) return "汽車";
+  if (n >= 2301 && n <= 2499) return "電子";
+  if (n >= 2501 && n <= 2548) return "營建";
+  if (n >= 2601 && n <= 2649) return "航運";
+  if (n >= 2701 && n <= 2739) return "觀光餐旅";
+  if (n >= 2801 && n <= 2899) return "金融保險";
+  if (n >= 2901 && n <= 2936) return "貿易百貨";
+  if (n >= 3000 && n <= 3999) return "電子";
+  if (n >= 4100 && n <= 4199) return "生技醫療";
+  if (n >= 4200 && n <= 4999) return "其他";
+  if (n >= 5000 && n <= 5999) return "電子";
+  if (n >= 6000 && n <= 6999) return "電子";
+  if (n >= 8000 && n <= 8999) return "其他";
+  if (n >= 9000 && n <= 9999) return "其他";
+  return "其他";
+}
+
+const SECTOR_LIST = ["全部", "電子", "金融保險", "航運", "鋼鐵", "塑膠", "生技醫療", "食品", "營建", "汽車", "紡織", "電機機械", "觀光餐旅", "貿易百貨", "水泥", "橡膠", "造紙", "玻璃陶瓷", "電器電纜", "其他"];
+
+// --- K 線圖元件 ---
+function KLineChart({ data, height = 160 }) {
+  if (!data || data.length < 2) return null;
+  const w = 320, padL = 4, padR = 40, padT = 8, padB = 18;
+  const cw = w - padL - padR, ch = height - padT - padB;
+  const highs = data.map(d => d.high), lows = data.map(d => d.low);
+  const max = Math.max(...highs), min = Math.min(...lows);
+  const range = max - min || 1;
+  const y = v => padT + ch - ((v - min) / range) * ch;
+  const bw = Math.max(2, (cw / data.length) * 0.65);
+  const x = i => padL + (i + 0.5) * (cw / data.length);
+
+  // 5日均線
+  const ma5 = data.map((_, i) => {
+    if (i < 4) return null;
+    return data.slice(i - 4, i + 1).reduce((s, d) => s + d.close, 0) / 5;
+  });
+  const maPath = ma5.map((v, i) => v === null ? null : `${x(i)},${y(v)}`).filter(Boolean).join(" ");
+
+  return (
+    <svg viewBox={`0 0 ${w} ${height}`} style={{ width: "100%", display: "block" }}>
+      {/* 水平參考線 */}
+      {[0, 0.5, 1].map(t => (
+        <g key={t}>
+          <line x1={padL} y1={padT + ch * t} x2={padL + cw} y2={padT + ch * t} stroke="#1e1e1e" strokeWidth="1" />
+          <text x={w - padR + 4} y={padT + ch * t + 4} fill="#777" fontSize="10">
+            {(max - range * t).toFixed(1)}
+          </text>
+        </g>
+      ))}
+      {/* K 棒 */}
+      {data.map((d, i) => {
+        const up = d.close >= d.open;
+        const col = up ? "#ef4444" : "#22c55e";
+        const bodyTop = y(Math.max(d.open, d.close));
+        const bodyH = Math.max(1, Math.abs(y(d.open) - y(d.close)));
+        return (
+          <g key={i}>
+            <line x1={x(i)} y1={y(d.high)} x2={x(i)} y2={y(d.low)} stroke={col} strokeWidth="1" />
+            <rect x={x(i) - bw / 2} y={bodyTop} width={bw} height={bodyH} fill={up ? col : "none"} stroke={col} strokeWidth="1" />
+          </g>
+        );
+      })}
+      {/* 5MA */}
+      {maPath && <polyline points={maPath} fill="none" stroke="#f59e0b" strokeWidth="1.2" opacity="0.85" />}
+      {/* 日期標示 */}
+      <text x={padL} y={height - 4} fill="#777" fontSize="10">{data[0]?.date?.slice(-5)}</text>
+      <text x={padL + cw} y={height - 4} fill="#777" fontSize="10" textAnchor="end">{data[data.length - 1]?.date?.slice(-5)}</text>
+    </svg>
+  );
 }
 
 // --- 用證交所真實數據計算買賣訊號（不需 AI）---
@@ -344,13 +473,13 @@ function SettingsPanel({ apiKey, onClose }) {
     try {
       const r = await callAI("台積電2330今天的收盤價是多少？只回答數字。", input, apiKey.provider);
       if (r.grounded) {
-        setTestResult({ ok: true, msg: "✅ 驗證成功，且即時搜尋可用！股價資料會是真實的。" });
+        setTestResult({ ok: true, msg: "驗證成功，且即時搜尋可用，股價資料會是真實的。" });
       } else {
-        setTestResult({ ok: true, warn: true, msg: "⚠️ Key 可用，但「即時搜尋」沒有啟用。AI 會用舊資料推測股價，數字不可信。建議改用 Anthropic Claude，或到 Google Cloud 啟用 Grounding with Google Search。" });
+        setTestResult({ ok: true, warn: true, msg: "Key 可用，但「即時搜尋」沒有啟用。AI 會用舊資料推測股價，數字不可信。建議改用 Anthropic Claude，或到 Google Cloud 啟用 Grounding with Google Search。" });
       }
       apiKey.save(input);
     } catch (e) {
-      setTestResult({ ok: false, msg: "❌ 驗證失敗：" + e.message });
+      setTestResult({ ok: false, msg: "驗證失敗：" + e.message });
     }
     setTesting(false);
   };
@@ -358,15 +487,15 @@ function SettingsPanel({ apiKey, onClose }) {
   return (
     <div style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 12, padding: 20, marginBottom: 14 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-        <div style={{ fontSize: 20, fontWeight: 700 }}>⚙️ API 設定</div>
-        <button onClick={onClose} style={{ background: "none", border: "none", color: "#ccc", fontSize: 22, cursor: "pointer" }}>✕</button>
+        <div style={{ fontSize: 20, fontWeight: 700 }}>API 設定</div>
+        <button onClick={onClose} style={{ background: "none", border: "none", color: "#ccc", fontSize: 22, cursor: "pointer" }}>×</button>
       </div>
 
       <div style={{ fontSize: 15, color: "#ccc", marginBottom: 8 }}>選擇 AI 引擎</div>
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         {[
-          { id: "gemini", name: "Google Gemini", tag: "🆓 免費", desc: "每天可用 500 次" },
-          { id: "anthropic", name: "Anthropic Claude", tag: "💰 付費", desc: "需儲值 $5 美金起" },
+          { id: "gemini", name: "Google Gemini", tag: "免費", desc: "每天可用 500 次" },
+          { id: "anthropic", name: "Anthropic Claude", tag: "付費", desc: "需儲值 $5 美金起" },
         ].map(p => (
           <button key={p.id} onClick={() => { apiKey.setProvider(p.id); setInput(""); setTestResult(null); }}
             style={{ flex: 1, padding: "14px 12px", borderRadius: 10, border: "2px solid " + (apiKey.provider === p.id ? "#f97316" : "#222"),
@@ -406,11 +535,11 @@ function SettingsPanel({ apiKey, onClose }) {
 
       <div style={{ marginTop: 14, padding: 14, background: "#0a0a0a", borderRadius: 8, fontSize: 14, color: "#bbb", lineHeight: 2 }}>
         {apiKey.provider === "gemini" ? (<>
-          <div style={{ fontWeight: 600, marginBottom: 4, color: "#22c55e", fontSize: 15 }}>🆓 免費取得 Gemini API Key</div>
+          <div style={{ fontWeight: 600, marginBottom: 4, color: "#22c55e", fontSize: 15 }}>免費取得 Gemini API Key</div>
           1. 到 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style={{ color: "#f97316" }}>aistudio.google.com/apikey</a> 用 Google 帳號登入<br/>
           2. 點「建立 API 金鑰」→ 選一個專案<br/>
           3. 複製金鑰（AIzaSy... 開頭）貼到上方<br/>
-          <strong style={{ color: "#22c55e" }}>✨ 完全免費，不需信用卡！</strong>
+          <strong style={{ color: "#22c55e" }}>完全免費，不需信用卡</strong>
         </>) : (<>
           <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 15 }}>取得 Anthropic API Key</div>
           1. 到 <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style={{ color: "#f97316" }}>console.anthropic.com</a> 登入<br/>
@@ -442,7 +571,7 @@ function TabDiagnosis({ watchlist, apiKey }) {
   const search = async (q) => {
     const searchQ = q || query;
     if (!searchQ.trim()) return;
-    if (!apiKey.hasKey) { setError("請先到右上角 ⚙️ 設定 API Key 才能使用 AI 診斷"); return; }
+    if (!apiKey.hasKey) { setError("請先在右上角設定 API Key 才能使用 AI 診斷"); return; }
     setLoading(true); setResult(null); setError("");
     try {
       // Step 1: Technical + Verdict
@@ -451,18 +580,18 @@ function TabDiagnosis({ watchlist, apiKey }) {
 
 請搜尋這檔股票最新資料，嚴格按以下格式回答（繁體中文）：
 
-📊 股票：[名稱] ([代號])
-💰 股價：[最新收盤價] 元（[漲跌金額] / [漲跌幅%]）
-📈 技術面：KD=[K值]/[D值]（[狀態]）、RSI=[數值]、MACD=[紅柱/綠柱]
-📊 均線：vs 5日/20日/60日均線（站上或跌破）
-🏦 法人：外資[買超/賣超]、投信[買超/賣超]（近5日累計）
+股票：[名稱] ([代號])
+股價：[最新收盤價] 元（[漲跌金額] / [漲跌幅%]）
+技術面：KD=[K值]/[D值]（[狀態]）、RSI=[數值]、MACD=[紅柱/綠柱]
+均線：vs 5日/20日/60日均線（站上或跌破）
+法人：外資[買超/賣超]、投信[買超/賣超]（近5日累計）
 
 ===== 診斷結論 =====
-🎯 判定：【買進】或【賣出】或【觀望】（三選一，必須明確）
-💪 信心度：[高/中/低]
-📝 一句話理由：[為什麼應該買或賣]
-🎯 建議策略：[具體操作，例如「分批買進，停損設在XX元」]
-⚠️ 最大風險：[主要風險]`, apiKey.key, apiKey.provider);
+判定：【買進】或【賣出】或【觀望】（三選一，必須明確）
+信心度：[高/中/低]
+一句話理由：[為什麼應該買或賣]
+建議策略：[具體操作，例如「分批買進，停損設在XX元」]
+最大風險：[主要風險]`, apiKey.key, apiKey.provider);
 
       // Step 2: Financial report
       setStep("分析財報數據…");
@@ -470,29 +599,29 @@ function TabDiagnosis({ watchlist, apiKey }) {
 
 請嚴格按照以下格式回答，每項給出 0-100 的評分：
 
-📊 財報健檢結果：
+財報健檢結果：
 
-1️⃣ 營收成長力 [評分]/100
+營收成長力 [評分]/100
    - 近四季營收年增率：[數據]
    - 趨勢：[連續成長/衰退/持平]
 
-2️⃣ 獲利能力 EPS [評分]/100
+獲利能力 EPS [評分]/100
    - 近四季 EPS：[數據]
    - 年增率：[數據]
 
-3️⃣ 毛利率表現 [評分]/100
+毛利率表現 [評分]/100
    - 最新毛利率：[數據]%
    - vs 同業平均：[高於/低於]
 
-4️⃣ 股東權益 ROE [評分]/100
+股東權益 ROE [評分]/100
    - 最新 ROE：[數據]%
    - 趨勢：[改善/惡化/穩定]
 
-5️⃣ 財務體質（負債比）[評分]/100
+財務體質（負債比）[評分]/100
    - 負債比率：[數據]%
    - 流動比率：[數據]%
 
-📋 財報總評：[用2句話總結這家公司的財務狀況，是否值得投資]`, apiKey.key, apiKey.provider);
+財報總評：[用2句話總結這家公司的財務狀況，是否值得投資]`, apiKey.key, apiKey.provider);
 
       // Step 3: News
       setStep("搜尋最新相關新聞…");
@@ -500,17 +629,17 @@ function TabDiagnosis({ watchlist, apiKey }) {
 
 請嚴格按以下格式回答（繁體中文）：
 
-📰 最新消息（近一週）
+最新消息（近一週）
 
-🔴/🟢 [利多/利空] [新聞標題摘要]
+/[利多/利空] [新聞標題摘要]
    → 影響：[對股價的可能影響，1句話]
 
-🔴/🟢 [利多/利空] [新聞標題摘要]
+/[利多/利空] [新聞標題摘要]
    → 影響：[對股價的可能影響，1句話]
 
 （列出 3-5 則）
 
-📊 新聞面總評：整體偏[利多/利空/中性]，[1句話說明]`, apiKey.key, apiKey.provider);
+新聞面總評：整體偏[利多/利空/中性]，[1句話說明]`, apiKey.key, apiKey.provider);
 
       const verdict = parseVerdict(techText);
       const info = parseStockInfo(techText);
@@ -533,7 +662,7 @@ function TabDiagnosis({ watchlist, apiKey }) {
       {/* Search bar */}
       <div style={{ padding: "16px 16px 12px", background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: "linear-gradient(135deg, #ef4444, #f97316)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>🔍</div>
+          
           <div>
             <div style={{ fontSize: 20, fontWeight: 700, color: "#e5e5e5" }}>個股 AI 全面診斷</div>
             <div style={{ fontSize: 14, color: "#ccc" }}>技術面 + 財報健檢 + 即時新聞，三合一分析</div>
@@ -562,11 +691,11 @@ function TabDiagnosis({ watchlist, apiKey }) {
       {/* No API Key warning */}
       {!apiKey.hasKey && !loading && !result && (
         <div style={{ margin: "12px 16px", padding: 16, background: "#1a1510", border: "1px solid #f59e0b44", borderRadius: 10, textAlign: "center" }}>
-          <div style={{ fontSize: 28, marginBottom: 8 }}>🔑</div>
+          <div style={{ fontSize: 28, marginBottom: 8 }}></div>
           <div style={{ fontSize: 16, fontWeight: 600, color: "#f59e0b", marginBottom: 6 }}>需要設定 API Key</div>
           <div style={{ fontSize: 14, color: "#ccc", lineHeight: 1.7 }}>
             AI 診斷功能需要 Anthropic API Key。<br/>
-            請點右上角 ⚙️ 進行設定。
+            請點右上角「設定 API Key」進行設定。
           </div>
         </div>
       )}
@@ -574,7 +703,7 @@ function TabDiagnosis({ watchlist, apiKey }) {
       {/* Error */}
       {error && (
         <div style={{ margin: "8px 16px", padding: 12, background: "#2a1515", border: "1px solid #dc2626", borderRadius: 8, fontSize: 14, color: "#fca5a5" }}>
-          ❌ {error}
+          {error}
         </div>
       )}
 
@@ -600,7 +729,7 @@ function TabDiagnosis({ watchlist, apiKey }) {
           {/* Verdict */}
           {result.grounded === false && (
             <div style={{ background: "#2a1510", border: "2px solid #f59e0b", borderRadius: 10, padding: 12, marginBottom: 10 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: "#f59e0b", marginBottom: 4 }}>⚠️ 未使用即時搜尋</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#f59e0b", marginBottom: 4 }}>未使用即時搜尋</div>
               <div style={{ fontSize: 13, color: "#ddd", lineHeight: 1.7 }}>
                 以下數字可能是 AI 推測的舊資料，不是今日真實股價。下單前請到券商 App 確認。
               </div>
@@ -612,13 +741,13 @@ function TabDiagnosis({ watchlist, apiKey }) {
           <button onClick={() => watchlist.add({ id: result.query, name: result.stockName || result.query, verdict: result.verdict, time: new Date().toISOString(), techText: result.techText, finText: result.finText })}
             disabled={watchlist.has(result.query)}
             style={{ width: "100%", padding: "8px 0", borderRadius: 8, border: "1px solid #333", background: watchlist.has(result.query) ? "#1a1a1a" : "#141414", color: watchlist.has(result.query) ? "#555" : "#f59e0b", fontSize: 16, fontWeight: 600, cursor: "pointer", marginBottom: 12 }}>
-            {watchlist.has(result.query) ? "✓ 已加入自選股" : "⭐ 加入自選股追蹤"}
+            {watchlist.has(result.query) ? "已加入自選股" : "加入自選股追蹤"}
           </button>
 
           {/* Financial Score Rings */}
           {result.finScores && Object.keys(result.finScores).length > 0 && (
             <div style={{ padding: "14px 10px 12px", marginBottom: 12, background: "#0d0d0d", borderRadius: 10, border: "1px solid #1a1a1a" }}>
-              <div style={{ fontSize: 14, color: "#aaa", marginBottom: 10, paddingLeft: 4 }}>📊 財報健檢評分</div>
+              <div style={{ fontSize: 14, color: "#aaa", marginBottom: 10, paddingLeft: 4 }}>財報健檢評分</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4 }}>
                 {[
                   ["revenue", "營收", "營收成長力"],
@@ -640,14 +769,14 @@ function TabDiagnosis({ watchlist, apiKey }) {
 
           {/* Collapsible sections */}
           {[
-            { key: "tech", icon: "📈", title: "技術面 + 買賣判定", content: result.techText },
-            { key: "fin", icon: "📊", title: "財報健檢", content: result.finText },
-            { key: "news", icon: "📰", title: "即時新聞 AI 解讀", content: result.newsText },
+            { key: "tech", title: "技術面 + 買賣判定", content: result.techText },
+            { key: "fin", title: "財報健檢", content: result.finText },
+            { key: "news", title: "即時新聞 AI 解讀", content: result.newsText },
           ].filter(s => s.content).map(section => (
             <div key={section.key} style={{ marginBottom: 8 }}>
               <button onClick={() => setOpenSection(prev => ({ ...prev, [section.key]: !prev[section.key] }))}
                 style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", background: "#0d0d0d", border: "1px solid #1a1a1a", borderRadius: openSection[section.key] ? "8px 8px 0 0" : 8, color: "#ccc", fontSize: 16, fontWeight: 600, cursor: "pointer" }}>
-                <span>{section.icon} {section.title}</span>
+                <span>{section.title}</span>
                 <span style={{ fontSize: 14, color: "#bbb" }}>{openSection[section.key] ? "▼" : "▶"}</span>
               </button>
               {openSection[section.key] && (
@@ -660,11 +789,11 @@ function TabDiagnosis({ watchlist, apiKey }) {
 
           {/* Actions */}
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button onClick={() => search(result.query)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid #222", background: "#141414", color: "#ddd", fontSize: 15, cursor: "pointer" }}>🔄 重新分析</button>
-            <button onClick={() => setResult(null)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid #222", background: "#141414", color: "#ddd", fontSize: 15, cursor: "pointer" }}>🔍 查詢其他</button>
+            <button onClick={() => search(result.query)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid #222", background: "#141414", color: "#ddd", fontSize: 15, cursor: "pointer" }}>重新分析</button>
+            <button onClick={() => setResult(null)} style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid #222", background: "#141414", color: "#ddd", fontSize: 15, cursor: "pointer" }}>查詢其他</button>
           </div>
           <div style={{ marginTop: 6, padding: "5px 10px", background: "#0a0a0a", borderRadius: 6, fontSize: 13, color: "#999", textAlign: "center" }}>
-            ⚠️ AI 分析僅供學習參考，不構成投資建議。投資有風險，請自行判斷。
+            AI 分析僅供學習參考，不構成投資建議。投資有風險，請自行判斷。
           </div>
         </div>
       )}
@@ -730,10 +859,10 @@ function TabWatchlist({ watchlist, apiKey, priceMap, onRefreshPrices }) {
 ${ctx}
 
 請簡潔回答（繁體中文，200字內）：
-📈 技術面：[目前趨勢與關鍵價位]
-🏦 籌碼面：[法人動向，若查得到]
-⚡ 近期題材：[重要利多或利空]
-🎯 操作建議：[具體怎麼做，含停損參考]`, apiKey.key, apiKey.provider);
+技術面：[目前趨勢與關鍵價位]
+籌碼面：[法人動向，若查得到]
+近期題材：[重要利多或利空]
+操作建議：[具體怎麼做，含停損參考]`, apiKey.key, apiKey.provider);
       setAiInfo(prev => ({ ...prev, [item.id]: { text, time: new Date().toLocaleString("zh-TW") } }));
     } catch (e) {
       setAiInfo(prev => ({ ...prev, [item.id]: { text: "分析失敗：" + e.message, time: "" } }));
@@ -744,17 +873,17 @@ ${ctx}
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <div style={{ fontSize: 18, fontWeight: 700 }}>⭐ 自選股追蹤 ({watchlist.list.length})</div>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>自選股追蹤 ({watchlist.list.length})</div>
         {watchlist.list.length > 0 && onRefreshPrices && (
           <button onClick={onRefreshPrices} style={{ padding: "5px 12px", borderRadius: 6, border: "1px solid #333", background: "#141414", color: "#f59e0b", fontSize: 14, cursor: "pointer" }}>
-            🔄 更新股價
+            更新股價
           </button>
         )}
       </div>
 
       {watchlist.list.length === 0 ? (
         <div style={{ padding: 40, textAlign: "center", background: "#111", borderRadius: 12, border: "1px solid #1e1e1e" }}>
-          <div style={{ fontSize: 32, marginBottom: 10 }}>⭐</div>
+          
           <div style={{ fontSize: 17, color: "#ccc", marginBottom: 4 }}>還沒有自選股</div>
           <div style={{ fontSize: 15, color: "#aaa" }}>在「買進」「賣出」或「診斷」頁點「加入自選股」即可追蹤</div>
         </div>
@@ -802,7 +931,7 @@ ${ctx}
                     {live ? (
                       <>
                         <div style={{ fontSize: 15, color: "#ccc", lineHeight: 1.8, marginBottom: 10 }}>
-                          📝 {live.reason || "當日無明顯訊號"}
+                          {live.reason || "當日無明顯訊號"}
                         </div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, marginBottom: 12 }}>
                           {[["開盤", live.open], ["最高", live.high], ["最低", live.low], ["成交量", live.volume ? Math.round(live.volume/1000) + "張" : "—"]].map(([l, v]) => (
@@ -848,7 +977,7 @@ ${ctx}
                       {apiKey.hasKey && (
                         <button onClick={() => askAI(item)} disabled={refreshing === item.id}
                           style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "1px solid #333", background: "#141414", color: "#f97316", fontSize: 14, cursor: "pointer" }}>
-                          {refreshing === item.id ? "分析中…" : ai ? "🔄 重新分析" : "🤖 AI 深度分析"}
+                          {refreshing === item.id ? "分析中…" : ai ? "重新分析" : "AI 深度分析"}
                         </button>
                       )}
                       <button onClick={() => watchlist.remove(item.id)}
@@ -868,34 +997,162 @@ ${ctx}
 }
 
 // ====================================
+// TAB: 排行榜
+// ====================================
+function TabRanking({ stocks, watchlist, scanCount, lastScan, scan, scanning }) {
+  const [rankType, setRankType] = useState("gain");
+  const [selected, setSelected] = useState(null);
+
+  const types = [
+    { key: "gain", label: "漲幅榜", sort: (a, b) => parseFloat(b.change) - parseFloat(a.change) },
+    { key: "loss", label: "跌幅榜", sort: (a, b) => parseFloat(a.change) - parseFloat(b.change) },
+    { key: "volume", label: "成交量榜", sort: (a, b) => (b.volume || 0) - (a.volume || 0) },
+    { key: "amp", label: "振幅榜", sort: (a, b) => {
+      const ampA = a.high && a.low ? (a.high - a.low) / a.low : 0;
+      const ampB = b.high && b.low ? (b.high - b.low) / b.low : 0;
+      return ampB - ampA;
+    }},
+  ];
+
+  const cur = types.find(t => t.key === rankType);
+  const ranked = [...stocks].sort(cur.sort).slice(0, 30);
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>每日排行榜</div>
+          {lastScan && <div style={{ fontSize: 13, color: "#999", marginTop: 2 }}>{scanCount ? `${scanCount} 檔 · ` : ""}{lastScan}</div>}
+        </div>
+        <button onClick={scan} disabled={scanning}
+          style={{ padding: "7px 13px", borderRadius: 8, border: "none", background: scanning ? "#333" : "linear-gradient(135deg, #ef4444, #f97316)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: scanning ? "wait" : "pointer" }}>
+          {scanning ? "更新中…" : "更新"}
+        </button>
+      </div>
+
+      {/* 榜單切換 */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
+        {types.map(t => (
+          <button key={t.key} onClick={() => setRankType(t.key)}
+            style={{ flex: 1, minWidth: 80, padding: "8px 4px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 14,
+              fontWeight: rankType === t.key ? 600 : 400,
+              background: rankType === t.key ? "#1f1f1f" : "#111",
+              color: rankType === t.key ? "#f97316" : "#888" }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {stocks.length === 0 ? (
+        <div style={{ padding: 40, textAlign: "center", background: "#111", borderRadius: 12, border: "1px solid #1e1e1e" }}>
+          
+          <div style={{ fontSize: 16, color: "#ccc" }}>尚未掃描</div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {ranked.map((s, i) => {
+            const isUp = s.change?.startsWith("+");
+            const open = selected === s.id;
+            const amp = s.high && s.low ? (((s.high - s.low) / s.low) * 100).toFixed(2) : null;
+            return (
+              <div key={s.id} onClick={() => setSelected(open ? null : s.id)}
+                style={{ background: open ? "#151515" : "#0f0f0f", border: `1px solid ${open ? "#2a2a2a" : "#181818"}`, borderRadius: 8, padding: "10px 12px", cursor: "pointer" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 24, fontSize: 15, fontWeight: 700, color: i < 3 ? "#f59e0b" : "#666", textAlign: "center" }}>{i + 1}</div>
+                  <div style={{ minWidth: 62 }}>
+                    <div style={{ fontSize: 16, fontWeight: 700 }}>{s.name}</div>
+                    <div style={{ fontSize: 12, color: "#999" }}>{s.id} · {getSector(s.id)}</div>
+                  </div>
+                  <div style={{ flex: 1, textAlign: "right" }}>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: isUp ? "#ef4444" : "#22c55e" }}>{s.price}</div>
+                    <div style={{ fontSize: 13, color: isUp ? "#ef4444" : "#22c55e" }}>{s.change}</div>
+                  </div>
+                  <div style={{ minWidth: 62, textAlign: "right" }}>
+                    <div style={{ fontSize: 12, color: "#888" }}>
+                      {rankType === "volume" ? "成交量" : rankType === "amp" ? "振幅" : "量"}
+                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "#ddd" }}>
+                      {rankType === "amp" ? `${amp}%` : `${Math.round((s.volume || 0) / 1000).toLocaleString()}張`}
+                    </div>
+                  </div>
+                </div>
+                {open && (
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #1e1e1e" }} onClick={e => e.stopPropagation()}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5, marginBottom: 8 }}>
+                      {[["開", s.open], ["高", s.high], ["低", s.low]].map(([l, v]) => (
+                        <div key={l} style={{ background: "#0a0a0a", borderRadius: 6, padding: "6px 4px", textAlign: "center" }}>
+                          <div style={{ fontSize: 12, color: "#888" }}>{l}</div>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: "#ddd" }}>{typeof v === "number" ? v.toFixed(2) : "—"}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {s.reason && <div style={{ fontSize: 14, color: "#bbb", marginBottom: 8 }}>{s.reason}</div>}
+                    <button onClick={() => watchlist.add({ id: s.id, name: s.name, verdict: s.verdict })}
+                      disabled={watchlist.has(s.id)}
+                      style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #333", background: "#141414", color: watchlist.has(s.id) ? "#666" : "#f59e0b", fontSize: 14, cursor: "pointer" }}>
+                      {watchlist.has(s.id) ? "已追蹤" : "加入自選股"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ====================================
 // TAB 3/4: AI 即時掃描 買進 / 賣出
 // ====================================
 const SCAN_STOCKS = ["2330 台積電", "2317 鴻海", "2454 聯發科", "2382 廣達", "3231 緯創", "2308 台達電", "2881 富邦金", "2882 國泰金", "2603 長榮", "3661 世芯-KY", "2345 智邦", "6669 緯穎", "2357 華碩", "2409 友達", "2002 中鋼", "6770 力積電"];
 
 function TabScan({ mode, watchlist, apiKey, scanState }) {
-  const { stocks, scanning: loading, scanError: progress, rawText, lastScan, scan, scanCount } = scanState;
+  const { stocks, scanning: loading, scanError: progress, rawText, lastScan, scan, scanCount, valuation } = scanState;
   const [selected, setSelected] = useState(null);
   const [search, setSearch] = useState("");
   const [limit, setLimit] = useState(50);
+  const [sector, setSector] = useState("全部");
+  const [maxPE, setMaxPE] = useState(0);
+  const [minDY, setMinDY] = useState(0);
+  const [showFilters, setShowFilters] = useState(false);
+  const [history, setHistory] = useState({});
+  const [loadingHist, setLoadingHist] = useState(null);
 
   const verdictColors = { "強力買進": "#dc2626", "買進": "#ef4444", "觀望": "#f59e0b", "賣出": "#22c55e", "強力賣出": "#16a34a" };
 
+  const loadHistory = async (code) => {
+    if (history[code]) return;
+    setLoadingHist(code);
+    try {
+      const d = await fetchStockHistory(code);
+      setHistory(prev => ({ ...prev, [code]: d.slice(-20) }));
+    } catch {
+      setHistory(prev => ({ ...prev, [code]: [] }));
+    }
+    setLoadingHist(null);
+  };
+
   const matched = stocks.filter(s => {
-    // 只顯示有明確訊號的（過濾掉觀望）
     if (mode === "buy" && !(s.verdict === "買進" || s.verdict === "強力買進")) return false;
     if (mode === "sell" && !(s.verdict === "賣出" || s.verdict === "強力賣出")) return false;
+    if (sector !== "全部" && getSector(s.id) !== sector) return false;
     if (search) {
       const q = search.trim();
       if (!s.name?.includes(q) && !s.id?.includes(q)) return false;
     }
+    const v = valuation?.[s.id];
+    if (maxPE > 0 && (!v?.pe || v.pe > maxPE || v.pe <= 0)) return false;
+    if (minDY > 0 && (!v?.dy || v.dy < minDY)) return false;
     return true;
   }).sort((a, b) => {
-    // 依訊號強度排序：買進由強到弱，賣出由弱到強
     const as = a.score ?? 0, bs = b.score ?? 0;
     return mode === "buy" ? bs - as : as - bs;
   });
 
   const filtered = matched.slice(0, limit);
+  const activeFilters = (sector !== "全部" ? 1 : 0) + (maxPE > 0 ? 1 : 0) + (minDY > 0 ? 1 : 0);
 
   const buyCount = stocks.filter(s => s.verdict === "買進" || s.verdict === "強力買進").length;
   const sellCount = stocks.filter(s => s.verdict === "賣出" || s.verdict === "強力賣出").length;
@@ -906,7 +1163,7 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
         <div>
           <div style={{ fontSize: 18, fontWeight: 700 }}>
-            {mode === "buy" ? "📈 可買進" : "📉 應賣出"}
+            {mode === "buy" ? "可買進" : "應賣出"}
             {matched.length > 0 && <span style={{ fontSize: 15, color: "#999", marginLeft: 8 }}>{matched.length} 檔</span>}
           </div>
           {lastScan && (
@@ -917,15 +1174,70 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
         </div>
         <button onClick={scan} disabled={loading}
           style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: loading ? "#333" : "linear-gradient(135deg, #ef4444, #f97316)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: loading ? "wait" : "pointer" }}>
-          {loading ? "掃描中…" : stocks.length > 0 ? "🔄 重新掃描" : "🔍 開始掃描"}
+          {loading ? "掃描中…" : stocks.length > 0 ? "重新掃描" : "開始掃描"}
         </button>
       </div>
 
-      {/* Search */}
+      {/* Search + Filters */}
       {stocks.length > 0 && (
-        <input value={search} onChange={e => { setSearch(e.target.value); setLimit(50); }}
-          placeholder="搜尋代號或名稱"
-          style={{ width: "100%", background: "#111", border: "1px solid #1e1e1e", borderRadius: 8, padding: "9px 12px", color: "#e5e5e5", fontSize: 15, outline: "none", marginBottom: 10, boxSizing: "border-box" }} />
+        <>
+          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            <input value={search} onChange={e => { setSearch(e.target.value); setLimit(50); }}
+              placeholder="搜尋代號或名稱"
+              style={{ flex: 1, background: "#111", border: "1px solid #1e1e1e", borderRadius: 8, padding: "9px 12px", color: "#e5e5e5", fontSize: 15, outline: "none", boxSizing: "border-box" }} />
+            <button onClick={() => setShowFilters(v => !v)}
+              style={{ padding: "9px 14px", borderRadius: 8, border: `1px solid ${activeFilters ? "#f97316" : "#1e1e1e"}`, background: activeFilters ? "#1a1510" : "#111", color: activeFilters ? "#f97316" : "#888", fontSize: 14, cursor: "pointer", whiteSpace: "nowrap" }}>
+              篩選{activeFilters ? ` ${activeFilters}` : ""}
+            </button>
+          </div>
+
+          {showFilters && (
+            <div style={{ background: "#0d0d0d", border: "1px solid #1e1e1e", borderRadius: 10, padding: 12, marginBottom: 10 }}>
+              {/* 產業 */}
+              <div style={{ fontSize: 14, color: "#bbb", marginBottom: 6 }}>產業分類</div>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 12 }}>
+                {SECTOR_LIST.map(s => (
+                  <button key={s} onClick={() => { setSector(s); setLimit(50); }}
+                    style={{ padding: "4px 10px", fontSize: 13, borderRadius: 8, cursor: "pointer",
+                      border: sector === s ? "1px solid #f97316" : "1px solid #222",
+                      background: sector === s ? "#1a1510" : "#111",
+                      color: sector === s ? "#f97316" : "#999" }}>{s}</button>
+                ))}
+              </div>
+
+              {/* 本益比 */}
+              <div style={{ fontSize: 14, color: "#bbb", marginBottom: 6 }}>本益比上限（低＝便宜）</div>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 12 }}>
+                {[[0, "不限"], [10, "≤10"], [15, "≤15"], [20, "≤20"], [30, "≤30"]].map(([v, l]) => (
+                  <button key={v} onClick={() => { setMaxPE(v); setLimit(50); }}
+                    style={{ padding: "4px 12px", fontSize: 13, borderRadius: 8, cursor: "pointer",
+                      border: maxPE === v ? "1px solid #f97316" : "1px solid #222",
+                      background: maxPE === v ? "#1a1510" : "#111",
+                      color: maxPE === v ? "#f97316" : "#999" }}>{l}</button>
+                ))}
+              </div>
+
+              {/* 殖利率 */}
+              <div style={{ fontSize: 14, color: "#bbb", marginBottom: 6 }}>殖利率下限（高＝配息好）</div>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                {[[0, "不限"], [3, "≥3%"], [4, "≥4%"], [5, "≥5%"], [6, "≥6%"]].map(([v, l]) => (
+                  <button key={v} onClick={() => { setMinDY(v); setLimit(50); }}
+                    style={{ padding: "4px 12px", fontSize: 13, borderRadius: 8, cursor: "pointer",
+                      border: minDY === v ? "1px solid #f97316" : "1px solid #222",
+                      background: minDY === v ? "#1a1510" : "#111",
+                      color: minDY === v ? "#f97316" : "#999" }}>{l}</button>
+                ))}
+              </div>
+
+              {activeFilters > 0 && (
+                <button onClick={() => { setSector("全部"); setMaxPE(0); setMinDY(0); setLimit(50); }}
+                  style={{ width: "100%", marginTop: 12, padding: "8px 0", borderRadius: 8, border: "1px solid #333", background: "#141414", color: "#ef4444", fontSize: 14, cursor: "pointer" }}>
+                  清除所有篩選
+                </button>
+              )}
+            </div>
+          )}
+        </>
       )}
 
 
@@ -943,7 +1255,7 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
       {progress && !loading && (
         <div style={{ marginBottom: 10 }}>
           <div style={{ padding: 12, background: "#2a1515", borderRadius: 8, fontSize: 14, color: "#fca5a5" }}>
-            ❌ {progress}
+            {progress}
             <button onClick={scan} style={{ marginLeft: 10, padding: "4px 12px", borderRadius: 6, border: "1px solid #dc2626", background: "#1a1a1a", color: "#fca5a5", fontSize: 13, cursor: "pointer" }}>
               重試
             </button>
@@ -975,7 +1287,7 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
                   <div style={{ width: 6, height: 6, borderRadius: 3, background: vc, flexShrink: 0 }} />
                   <div style={{ minWidth: 60 }}>
                     <div style={{ fontSize: 17, fontWeight: 700 }}>{stock.name}</div>
-                    <div style={{ fontSize: 13, color: "#999" }}>{stock.id}{stock.sector ? ` · ${stock.sector}` : ""}</div>
+                    <div style={{ fontSize: 13, color: "#999" }}>{stock.id} · {getSector(stock.id)}</div>
                   </div>
                   <div style={{ flex: 1, textAlign: "right" }}>
                     <div style={{ fontSize: 20, fontWeight: 700, color: isUp ? "#ef4444" : "#22c55e" }}>{stock.price}</div>
@@ -988,7 +1300,7 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
                 {open && (
                   <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #1e1e1e" }} onClick={e => e.stopPropagation()}>
                     <div style={{ fontSize: 15, color: "#ccc", lineHeight: 1.8, marginBottom: 8 }}>
-                      📝 {stock.reason}
+                      {stock.reason}
                     </div>
                     {stock.open && (
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, marginBottom: 10 }}>
@@ -1000,10 +1312,44 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
                         ))}
                       </div>
                     )}
+
+                    {/* 估值資料 */}
+                    {valuation?.[stock.id] && (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5, marginBottom: 10 }}>
+                        {[
+                          ["本益比", valuation[stock.id].pe, v => v > 0 ? v.toFixed(1) : "—"],
+                          ["殖利率", valuation[stock.id].dy, v => v > 0 ? v.toFixed(2) + "%" : "—"],
+                          ["股價淨值比", valuation[stock.id].pb, v => v > 0 ? v.toFixed(2) : "—"],
+                        ].map(([l, v, fmt]) => (
+                          <div key={l} style={{ background: "#0a0a0a", borderRadius: 6, padding: "6px 4px", textAlign: "center" }}>
+                            <div style={{ fontSize: 12, color: "#888" }}>{l}</div>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: "#f59e0b" }}>{v ? fmt(v) : "—"}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* K 線圖 */}
+                    {history[stock.id] === undefined ? (
+                      <button onClick={() => loadHistory(stock.id)} disabled={loadingHist === stock.id}
+                        style={{ width: "100%", padding: "9px 0", borderRadius: 8, border: "1px solid #2a2a2a", background: "#111", color: "#f97316", fontSize: 14, cursor: "pointer", marginBottom: 10 }}>
+                        {loadingHist === stock.id ? "載入中…" : "顯示近 20 日 K 線"}
+                      </button>
+                    ) : history[stock.id].length > 0 ? (
+                      <div style={{ background: "#0a0a0a", borderRadius: 8, padding: "8px 4px", marginBottom: 10 }}>
+                        <div style={{ fontSize: 12, color: "#888", paddingLeft: 6, marginBottom: 2 }}>
+                          近 20 日 K 線　<span style={{ color: "#f59e0b" }}>— 5MA</span>
+                        </div>
+                        <KLineChart data={history[stock.id]} />
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 13, color: "#888", marginBottom: 10 }}>K 線資料載入失敗</div>
+                    )}
+
                     <button onClick={() => watchlist.add({ id: stock.id, name: stock.name, verdict: stock.verdict })}
                       disabled={watchlist.has(stock.id)}
                       style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #333", background: "#141414", color: watchlist.has(stock.id) ? "#666" : "#f59e0b", fontSize: 14, cursor: "pointer" }}>
-                      {watchlist.has(stock.id) ? "✓ 已追蹤" : "⭐ 加入自選股"}
+                      {watchlist.has(stock.id) ? "已追蹤" : "加入自選股"}
                     </button>
                   </div>
                 )}
@@ -1022,7 +1368,7 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
       {/* Empty state */}
       {!loading && stocks.length === 0 && (
         <div style={{ padding: 40, textAlign: "center", background: "#111", borderRadius: 12, border: "1px solid #1e1e1e" }}>
-          <div style={{ fontSize: 32, marginBottom: 10 }}>{mode === "buy" ? "📈" : "📉"}</div>
+          
           <div style={{ fontSize: 16, color: "#ccc", marginBottom: 6 }}>尚未掃描</div>
           <div style={{ fontSize: 14, color: "#999" }}>點上方「開始掃描」，分析全上市約 1000 檔股票的真實收盤資料</div>
         </div>
@@ -1052,6 +1398,10 @@ export default function App() {
   const [lastScan, setLastScan] = useState(() => localStorage.getItem("tw-stock-scan-time") || "");
   const [grounded, setGrounded] = useState(() => localStorage.getItem("tw-stock-grounded") === "1");
   const [scanCount, setScanCount] = useState(() => parseInt(localStorage.getItem("tw-stock-count")) || 0);
+  const [valuation, setValuation] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("tw-stock-valuation")) || null; }
+    catch { return null; }
+  });
   const [priceMap, setPriceMap] = useState(() => {
     try { return JSON.parse(localStorage.getItem("tw-stock-pricemap")) || null; }
     catch { return null; }
@@ -1118,6 +1468,16 @@ export default function App() {
       setGrounded(true);
       setScanCount(tradable.length);
 
+      // 抓本益比、殖利率（失敗不影響主流程）
+      try {
+        const val = await fetchValuation();
+        setValuation(val);
+        const codes = new Set(tradable.map(t => t.code));
+        const slimVal = {};
+        codes.forEach(c => { if (val[c]) slimVal[c] = val[c]; });
+        try { localStorage.setItem("tw-stock-valuation", JSON.stringify(slimVal)); } catch {}
+      } catch {}
+
       // 保留自選股的完整資料供追蹤頁使用
       const keep = new Set(watchlist.list.map(w => w.id));
       const slim = {};
@@ -1146,7 +1506,7 @@ export default function App() {
     if (!index || stale) fetchIndex();
   }, [apiKey.hasKey]);
 
-  const scanState = { stocks, scanning, scanError, rawText, lastScan, scan, scanCount };
+  const scanState = { stocks, scanning, scanError, rawText, lastScan, scan, scanCount, valuation };
   const buyCount = stocks.filter(s => s.verdict === "買進" || s.verdict === "強力買進").length;
   const sellCount = stocks.filter(s => s.verdict === "賣出" || s.verdict === "強力賣出").length;
 
@@ -1161,7 +1521,7 @@ export default function App() {
             <div style={{ marginLeft: "auto" }}>
               <button onClick={() => setShowSettings(!showSettings)}
                 style={{ background: apiKey.hasKey ? "#1a1a1a" : "#2a1510", border: `1px solid ${apiKey.hasKey ? "#333" : "#f59e0b"}`, borderRadius: 8, padding: "6px 12px", color: apiKey.hasKey ? "#ccc" : "#f59e0b", fontSize: 14, cursor: "pointer" }}>
-                ⚙️ {apiKey.hasKey ? "已設定" : "設定 API Key"}
+                {apiKey.hasKey ? "已設定" : "設定 API Key"}
               </button>
             </div>
           </div>
@@ -1170,7 +1530,7 @@ export default function App() {
             {(
               <button onClick={() => { scan(); fetchIndex(); }} disabled={scanning}
                 style={{ background: "none", border: "none", color: scanning ? "#666" : "#f97316", fontSize: 13, cursor: scanning ? "wait" : "pointer", padding: 0 }}>
-                {scanning ? "更新中…" : "🔄 全部更新"}
+                {scanning ? "更新中…" : "全部更新"}
               </button>
             )}
             {lastScan && !scanning && <span style={{ fontSize: 12, color: "#777" }}>{lastScan}</span>}
@@ -1198,16 +1558,17 @@ export default function App() {
         {/* Tab nav */}
         <div style={{ display: "flex", background: "#111", borderRadius: 10, padding: 3, marginBottom: 14, border: "1px solid #1a1a1a", gap: 2 }}>
           {[
-            { key: "search", icon: "🔍", label: "診斷" },
-            { key: "watchlist", icon: "⭐", label: `自選${watchlist.list.length > 0 ? ` ${watchlist.list.length}` : ""}` },
-            { key: "buy", icon: "📈", label: "買進" },
-            { key: "sell", icon: "📉", label: "賣出" },
+            { key: "search", label: "診斷" },
+            { key: "watchlist", label: `自選${watchlist.list.length > 0 ? ` ${watchlist.list.length}` : ""}` },
+            { key: "buy", label: "買進" },
+            { key: "sell", label: "賣出" },
+            { key: "rank", label: "排行" },
           ].map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
-              style={{ flex: 1, padding: "7px 2px", borderRadius: 7, border: "none", cursor: "pointer", fontSize: 15, fontWeight: tab === t.key ? 600 : 400, transition: "all 0.2s",
+              style={{ flex: 1, padding: "7px 1px", borderRadius: 7, border: "none", cursor: "pointer", fontSize: 13, fontWeight: tab === t.key ? 600 : 400, transition: "all 0.2s",
                 background: tab === t.key ? "#1f1f1f" : "transparent",
-                color: tab === t.key ? (t.key === "sell" ? "#22c55e" : t.key === "buy" ? "#ef4444" : t.key === "watchlist" ? "#f59e0b" : "#f97316") : "#555" }}>
-              {t.icon} {t.label}
+                color: tab === t.key ? (t.key === "sell" ? "#22c55e" : t.key === "buy" ? "#ef4444" : t.key === "watchlist" ? "#f59e0b" : t.key === "rank" ? "#60a5fa" : "#f97316") : "#555" }}>
+              {t.label}
             </button>
           ))}
         </div>
@@ -1215,8 +1576,8 @@ export default function App() {
         {/* Data source badge */}
         {stocks.length > 0 && (
           <div style={{ background: "#0d1f0d", border: "1px solid #16a34a44", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 13, color: "#86efac" }}>
-            ✅ 資料來自臺灣證券交易所官方 OpenAPI，訊號依當日開高低收與量能計算
-            {!apiKey.hasKey && <span style={{ color: "#f59e0b" }}>　·　設定 ⚙️ API Key 可加上 AI 深度解讀</span>}
+            資料來自臺灣證券交易所官方 OpenAPI，訊號依當日開高低收與量能計算
+            {!apiKey.hasKey && <span style={{ color: "#f59e0b" }}>　·　設定 API Key 可加上 AI 深度解讀</span>}
           </div>
         )}
 
@@ -1228,10 +1589,11 @@ export default function App() {
         {tab === "watchlist" && <TabWatchlist watchlist={watchlist} apiKey={apiKey} priceMap={priceMap} onRefreshPrices={scan} />}
         {tab === "buy" && <TabScan mode="buy" watchlist={watchlist} apiKey={apiKey} scanState={scanState} />}
         {tab === "sell" && <TabScan mode="sell" watchlist={watchlist} apiKey={apiKey} scanState={scanState} />}
+        {tab === "rank" && <TabRanking stocks={stocks} watchlist={watchlist} scanCount={scanCount} lastScan={lastScan} scan={scan} scanning={scanning} />}
 
         {/* Footer */}
         <div style={{ marginTop: 20, padding: 12, background: "#0d0d0d", borderRadius: 10, border: "1px solid #151515" }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: "#aaa", marginBottom: 4 }}>📐 分析方法</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#aaa", marginBottom: 4 }}>分析方法</div>
           <div style={{ fontSize: 13, color: "#999", lineHeight: 1.7 }}>
             六維綜合評分（KD/RSI/MACD/均線/法人/估值）＋ AI 即時財報健檢（營收成長/EPS/毛利率/ROE/負債比）＋ 即時新聞 AI 解讀利多利空。自選股追蹤儲存於瀏覽器。所有內容僅供參考，不構成投資建議。
           </div>
