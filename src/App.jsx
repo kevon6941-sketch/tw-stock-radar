@@ -107,21 +107,31 @@ function useWatchlist() {
 
 // --- TWSE 官方 API（免金鑰、真實資料）---
 const CORS_PROXIES = [
-  (u) => u,                                              // 直連（openapi 通常允許 CORS）
-  (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+  (u) => u,                                                        // 直連
   (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  (u) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+  (u) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+  (u) => `https://thingproxy.freeboard.io/fetch/${u}`,
 ];
 
 async function fetchTWSE(url) {
-  let lastErr;
+  const errs = [];
   for (const wrap of CORS_PROXIES) {
     try {
-      const r = await fetch(wrap(url));
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 12000);
+      const r = await fetch(wrap(url), { signal: ctrl.signal });
+      clearTimeout(timer);
       if (!r.ok) throw new Error("HTTP " + r.status);
-      return await r.json();
-    } catch (e) { lastErr = e; }
+      const txt = await r.text();
+      const json = JSON.parse(txt);
+      if (!Array.isArray(json) || json.length === 0) throw new Error("空資料");
+      return json;
+    } catch (e) {
+      errs.push(e.name === "AbortError" ? "逾時" : e.message);
+    }
   }
-  throw lastErr || new Error("無法連線證交所");
+  throw new Error("證交所連線失敗（" + errs.join(" / ") + "）");
 }
 
 // 全上市個股當日收盤行情
@@ -728,6 +738,9 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
         <div style={{ marginBottom: 10 }}>
           <div style={{ padding: 12, background: "#2a1515", borderRadius: 8, fontSize: 14, color: "#fca5a5" }}>
             ❌ {progress}
+            <button onClick={scan} style={{ marginLeft: 10, padding: "4px 12px", borderRadius: 6, border: "1px solid #dc2626", background: "#1a1a1a", color: "#fca5a5", fontSize: 13, cursor: "pointer" }}>
+              重試
+            </button>
           </div>
           {rawText && (
             <div style={{ marginTop: 8, padding: 12, background: "#0a0a0a", borderRadius: 8, fontSize: 12, color: "#999", whiteSpace: "pre-wrap", maxHeight: 300, overflowY: "auto", border: "1px solid #222" }}>
@@ -800,7 +813,7 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
 // MAIN APP
 // ====================================
 export default function App() {
-  const [tab, setTab] = useState("search");
+  const [tab, setTab] = useState("buy");
   const [showSettings, setShowSettings] = useState(false);
   const [now] = useState(new Date());
   const watchlist = useWatchlist();
@@ -830,7 +843,9 @@ export default function App() {
         setIndex(idx);
         localStorage.setItem("tw-stock-index", JSON.stringify(idx));
       }
-    } catch {}
+    } catch (e) {
+      console.warn("加權指數抓取失敗:", e.message);
+    }
   };
 
   const scan = async () => {
