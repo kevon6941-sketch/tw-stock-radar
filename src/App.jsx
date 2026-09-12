@@ -1,5 +1,17 @@
 import { useState, useEffect } from "react";
 
+// --- 動能訊號定義（技術面評分，非進場建議）---
+// 內部 key 沿用原字串以相容既有 localStorage 資料
+const SIGNAL_META = {
+  "強力買進": { label: "強勢",   color: "#dc2626", desc: "當日動能明顯偏強" },
+  "買進":     { label: "轉強",   color: "#ef4444", desc: "動能偏多" },
+  "觀望":     { label: "中性",   color: "#f59e0b", desc: "多空不明" },
+  "賣出":     { label: "轉弱",   color: "#22c55e", desc: "動能偏空" },
+  "強力賣出": { label: "弱勢",   color: "#16a34a", desc: "當日動能明顯偏弱" },
+};
+const sigLabel = (v) => SIGNAL_META[v]?.label || v;
+const sigColor = (v) => SIGNAL_META[v]?.color || "#888";
+
 // --- Verdict Card ---
 function VerdictCard({ verdict, stockName, price, change }) {
   const map = {
@@ -861,20 +873,35 @@ function analyzeTechnical(data) {
   else if (score > -6) verdict = "賣出";
   else verdict = "強力賣出";
 
+  // 追高風險：乖離率 + RSI + KD 綜合判斷
+  let risk = null;
+  const bias20 = ma20 ? ((close - ma20) / ma20) * 100 : 0;
+  if (bias20 > 20) risk = { level: "high", text: `股價已高出月線 ${bias20.toFixed(0)}%，嚴重超漲，等回測均線較安全` };
+  else if (bias20 > 12) risk = { level: "mid", text: `高出月線 ${bias20.toFixed(0)}%，短線漲多，可等回檔` };
+  else if (rsi !== null && rsi > 78) risk = { level: "mid", text: `RSI ${rsi.toFixed(0)} 明顯超買，追價風險高` };
+  else if (kd && kd.k > 88) risk = { level: "mid", text: `KD 高檔鈍化（K ${kd.k.toFixed(0)}），隨時可能回檔` };
+
+  // 參考價位：以均線作為回檔支撐參考
+  const zones = ma5 && ma10 && ma20 ? {
+    pullback: [Math.min(ma5, ma10), Math.max(ma5, ma10)],
+    support: ma20,
+  } : null;
+
   return {
-    verdict, score, detail, mode: "deep",
+    verdict, score, detail, risk, zones, mode: "deep",
     reason: signals.slice(0, 4).join("、"),
     indicators: { ma5, ma10, ma20, rsi, k: kd?.k, d: kd?.d, macd: macd?.osc, volRatio },
   };
 }
 
 // --- 評分明細說明 ---
-function ScoreBreakdown({ detail, score, verdict, mode }) {
+function ScoreBreakdown({ detail, score, verdict, mode, risk, zones }) {
   if (!detail || detail.length === 0) return null;
 
   const thresholds = mode === "deep"
     ? [["強力買進", 6], ["買進", 2.5], ["觀望", -2.5], ["賣出", -6]]
     : [["強力買進", 5], ["買進", 2.5], ["觀望", -2.5], ["賣出", -5]];
+  const tierLabel = (k) => sigLabel(k);
 
   const vc = { "強力買進": "#dc2626", "買進": "#ef4444", "觀望": "#f59e0b", "賣出": "#22c55e", "強力賣出": "#16a34a" }[verdict] || "#888";
   const plus = detail.filter(d => d.pts > 0);
@@ -884,12 +911,40 @@ function ScoreBreakdown({ detail, score, verdict, mode }) {
     <div style={{ background: "#0a0a0a", borderRadius: 8, padding: 12, marginBottom: 10 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <span style={{ fontSize: 14, color: "#ccc", fontWeight: 600 }}>
-          為什麼判定「{verdict}」
+          為什麼是「{sigLabel(verdict)}」
         </span>
         <span style={{ fontSize: 13, color: "#888" }}>
           {mode === "deep" ? "深度分析" : "當日快篩"}
         </span>
       </div>
+      <div style={{ fontSize: 12, color: "#999", background: "#111", borderRadius: 6, padding: "6px 9px", marginBottom: 10, lineHeight: 1.6 }}>
+        這是技術面動能評分，不是進場建議。分數高代表近期買盤強，但不代表現在這個價位適合買。
+      </div>
+
+      {/* 追高風險提示 */}
+      {risk && (
+        <div style={{
+          background: risk.level === "high" ? "#2a1510" : "#1a1510",
+          border: `1px solid ${risk.level === "high" ? "#f59e0b" : "#f59e0b44"}`,
+          borderRadius: 7, padding: "8px 10px", marginBottom: 10,
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#fcd34d", marginBottom: 2 }}>
+            {risk.level === "high" ? "追高風險高" : "位階偏高"}
+          </div>
+          <div style={{ fontSize: 12, color: "#ddd", lineHeight: 1.6 }}>{risk.text}</div>
+        </div>
+      )}
+
+      {/* 回檔參考區間 */}
+      {zones && (
+        <div style={{ background: "#111", borderRadius: 7, padding: "8px 10px", marginBottom: 10 }}>
+          <div style={{ fontSize: 12, color: "#bbb", marginBottom: 4 }}>技術面參考價位</div>
+          <div style={{ fontSize: 12, color: "#ddd", lineHeight: 1.7 }}>
+            回檔支撐帶　{zones.pullback[0].toFixed(2)} ~ {zones.pullback[1].toFixed(2)}（5/10日均線）<br />
+            中期防守　　{zones.support.toFixed(2)}（月線，跌破代表趨勢轉弱）
+          </div>
+        </div>
+      )}
 
       {/* 明細條列 */}
       <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 10 }}>
@@ -931,7 +986,7 @@ function ScoreBreakdown({ detail, score, verdict, mode }) {
                 border: isCur ? `1px solid ${vc}66` : "1px solid #1a1a1a",
                 fontWeight: isCur ? 700 : 400,
               }}>
-                <div>{name}</div>
+                <div>{tierLabel(name)}</div>
                 <div style={{ fontSize: 10, marginTop: 1 }}>≥{min}</div>
               </div>
             );
@@ -943,7 +998,7 @@ function ScoreBreakdown({ detail, score, verdict, mode }) {
             border: verdict === "強力賣出" ? "1px solid #16a34a66" : "1px solid #1a1a1a",
             fontWeight: verdict === "強力賣出" ? 700 : 400,
           }}>
-            <div>強力賣出</div>
+            <div>{sigLabel("強力賣出")}</div>
             <div style={{ fontSize: 10, marginTop: 1 }}>更低</div>
           </div>
         </div>
@@ -1012,7 +1067,13 @@ function calcVerdict(r) {
   else if (score > -5) verdict = "賣出";
   else verdict = "強力賣出";
 
-  return { verdict, reason: reasons.slice(0, 3).join("、"), score, detail, mode: "quick" };
+  // 追高風險評估
+  let risk = null;
+  if (pct >= 7) risk = { level: "high", text: `今日已漲 ${pct.toFixed(1)}%，現價追進成本偏高，回檔風險大` };
+  else if (pct >= 4 && pos >= 0.85) risk = { level: "mid", text: `漲 ${pct.toFixed(1)}% 且收在最高附近，短線位階偏高` };
+  else if (range > 0 && r.close > 0 && (range / r.close) * 100 >= 7) risk = { level: "mid", text: "當日振幅劇烈，價格不穩定" };
+
+  return { verdict, reason: reasons.slice(0, 3).join("、"), score, detail, risk, mode: "quick" };
 }
 
 // --- API Key management ---
@@ -1275,7 +1336,7 @@ function TabDiagnosis({ watchlist, apiKey, stocks }) {
     setLoading(false); setStep("");
   };
 
-  const verdictColors = { "強力買進": "#dc2626", "買進": "#ef4444", "觀望": "#f59e0b", "賣出": "#22c55e", "強力賣出": "#16a34a" };
+  const verdictColors = Object.fromEntries(Object.entries(SIGNAL_META).map(([k, v]) => [k, v.color]));
   const quickStocks = ["台積電", "鴻海", "聯發科", "廣達", "緯創", "富邦金", "長榮", "華碩"];
   const [openSection, setOpenSection] = useState({ tech: true, fin: true, news: true });
 
@@ -1469,7 +1530,7 @@ function TabWatchlist({ watchlist, apiKey, priceMap }) {
   const [loadingPrices, setLoadingPrices] = useState(false);
   const [priceError, setPriceError] = useState("");
 
-  const verdictColors = { "強力買進": "#dc2626", "買進": "#ef4444", "觀望": "#f59e0b", "賣出": "#22c55e", "強力賣出": "#16a34a" };
+  const verdictColors = Object.fromEntries(Object.entries(SIGNAL_META).map(([k, v]) => [k, v.color]));
 
   const effectiveMap = { ...(priceMap || {}), ...(localPrices || {}) };
 
@@ -1543,6 +1604,7 @@ function TabWatchlist({ watchlist, apiKey, priceMap }) {
         reason: v.reason,
         detail: v.detail,
         score: v.score,
+        risk: v.risk,
       },
     };
   });
@@ -1626,7 +1688,7 @@ ${ctx}
                     )}
                   </div>
                   <div style={{ padding: "4px 10px", borderRadius: 6, fontSize: 14, fontWeight: 600, background: vc + "18", color: vc, whiteSpace: "nowrap" }}>
-                    {verdict}
+                    {sigLabel(verdict)}
                   </div>
                 </div>
 
@@ -1636,7 +1698,7 @@ ${ctx}
                     {live ? (
                       <>
                         {live.detail?.length > 0
-                          ? <ScoreBreakdown detail={live.detail} score={live.score} verdict={live.verdict} mode="quick" />
+                          ? <ScoreBreakdown detail={live.detail} score={live.score} verdict={live.verdict} mode="quick" risk={live.risk} />
                           : <div style={{ fontSize: 15, color: "#ccc", lineHeight: 1.8, marginBottom: 10 }}>當日無明顯訊號</div>}
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, marginBottom: 12 }}>
                           {[["開盤", live.open], ["最高", live.high], ["最低", live.low], ["成交量", live.volume ? Math.round(live.volume/1000) + "張" : "—"]].map(([l, v]) => (
@@ -1795,7 +1857,7 @@ function TabRanking({ stocks, watchlist, scanCount, lastScan, scan, scanning }) 
                         </div>
                       ))}
                     </div>
-                    {s.detail?.length > 0 && <ScoreBreakdown detail={s.detail} score={s.score} verdict={s.verdict} mode={s.scoreMode} />}
+                    {s.detail?.length > 0 && <ScoreBreakdown detail={s.detail} score={s.score} verdict={s.verdict} mode={s.scoreMode} risk={s.risk} />}
                     <button onClick={() => watchlist.add({ id: s.id, name: s.name, verdict: s.verdict })}
                       disabled={watchlist.has(s.id)}
                       style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #333", background: "#141414", color: watchlist.has(s.id) ? "#666" : "#f59e0b", fontSize: 14, cursor: "pointer" }}>
@@ -1838,7 +1900,7 @@ function TabScan({ mode, watchlist, scanState }) {
   const [deepError, setDeepError] = useState("");
   const [useDeep, setUseDeep] = useState(false);
 
-  const verdictColors = { "強力買進": "#dc2626", "買進": "#ef4444", "觀望": "#f59e0b", "賣出": "#22c55e", "強力賣出": "#16a34a" };
+  const verdictColors = Object.fromEntries(Object.entries(SIGNAL_META).map(([k, v]) => [k, v.color]));
 
   const loadHistory = async (code) => {
     if (history[code]) return;
@@ -1988,7 +2050,7 @@ function TabScan({ mode, watchlist, scanState }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
         <div>
           <div style={{ fontSize: 18, fontWeight: 700 }}>
-            {mode === "buy" ? "可買進" : "應賣出"}
+            {mode === "buy" ? "強勢股" : "弱勢股"}
             {matched.length > 0 && <span style={{ fontSize: 15, color: "#999", marginLeft: 8 }}>{matched.length} 檔</span>}
           </div>
           {lastScan && (
@@ -2160,13 +2222,20 @@ function TabScan({ mode, watchlist, scanState }) {
                     <div style={{ fontSize: 20, fontWeight: 700, color: isUp ? "#ef4444" : "#22c55e" }}>{stock.price}</div>
                     <div style={{ fontSize: 14, color: isUp ? "#ef4444" : "#22c55e" }}>{stock.change}</div>
                   </div>
-                  <div style={{ padding: "4px 10px", borderRadius: 6, fontSize: 14, fontWeight: 600, background: vc + "18", color: vc, whiteSpace: "nowrap" }}>
-                    {stock.verdict}
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                    <div style={{ padding: "4px 10px", borderRadius: 6, fontSize: 14, fontWeight: 600, background: vc + "18", color: vc, whiteSpace: "nowrap" }}>
+                      {sigLabel(stock.verdict)}
+                    </div>
+                    {(stock.risk || stock.deep?.risk) && (
+                      <span style={{ fontSize: 11, color: "#f59e0b", whiteSpace: "nowrap" }}>
+                        {(stock.risk || stock.deep?.risk).level === "high" ? "追高風險" : "位階偏高"}
+                      </span>
+                    )}
                   </div>
                 </div>
                 {open && (
                   <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #1e1e1e" }} onClick={e => e.stopPropagation()}>
-                    <ScoreBreakdown detail={stock.detail} score={stock.score} verdict={stock.verdict} mode={stock.scoreMode} />
+                    <ScoreBreakdown detail={stock.detail} score={stock.score} verdict={stock.verdict} mode={stock.scoreMode} risk={stock.risk || stock.deep?.risk} zones={stock.deep?.zones} />
                     {getThemes(stock.id).length > 0 && (
                       <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
                         {getThemes(stock.id).map(t => (
@@ -2373,6 +2442,7 @@ export default function App() {
           reason: v.reason,
           score: v.score,
           detail: v.detail,
+          risk: v.risk,
           scoreMode: "quick",
           sector: "",
           open: r.open, high: r.high, low: r.low, volume: r.volume,
@@ -2402,7 +2472,7 @@ export default function App() {
       // localStorage 有 5MB 上限，存精簡欄位；超量時逐步降量重試
       const compact = scored.map(s => ({
         id: s.id, name: s.name, price: s.price, change: s.change,
-        verdict: s.verdict, reason: s.reason, score: s.score, detail: s.detail,
+        verdict: s.verdict, reason: s.reason, score: s.score, detail: s.detail, risk: s.risk,
         open: s.open, high: s.high, low: s.low, volume: s.volume,
       }));
       for (const n of [compact.length, 800, 400, 200]) {
@@ -2470,8 +2540,8 @@ export default function App() {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, margin: "12px 0" }}>
           {[
             { label: "加權指數", val: index?.value || "—", sub: index ? `${index.change} (${index.pct})` : (apiKey.hasKey ? "查詢中…" : "需設定 Key"), col: index?.pct?.startsWith("-") ? "#22c55e" : "#ef4444" },
-            { label: "可買進", val: stocks.length ? `${buyCount}` : "—", sub: stocks.length ? `/ ${scanCount} 檔` : (scanning ? "掃描中…" : "待掃描"), col: "#ef4444" },
-            { label: "應賣出", val: stocks.length ? `${sellCount}` : "—", sub: stocks.length ? `/ ${scanCount} 檔` : (scanning ? "掃描中…" : "待掃描"), col: "#22c55e" },
+            { label: "強勢股", val: stocks.length ? `${buyCount}` : "—", sub: stocks.length ? `/ ${scanCount} 檔` : (scanning ? "掃描中…" : "待掃描"), col: "#ef4444" },
+            { label: "弱勢股", val: stocks.length ? `${sellCount}` : "—", sub: stocks.length ? `/ ${scanCount} 檔` : (scanning ? "掃描中…" : "待掃描"), col: "#22c55e" },
             { label: "自選股", val: `${watchlist.list.length}`, sub: "追蹤中", col: "#f59e0b" },
           ].map((c, i) => (
             <div key={i} style={{ background: "#111", borderRadius: 8, padding: "7px 8px", border: "1px solid #1a1a1a" }}>
@@ -2487,8 +2557,8 @@ export default function App() {
           {[
             { key: "search", label: "診斷" },
             { key: "watchlist", label: `自選${watchlist.list.length > 0 ? ` ${watchlist.list.length}` : ""}` },
-            { key: "buy", label: "買進" },
-            { key: "sell", label: "賣出" },
+            { key: "buy", label: "強勢" },
+            { key: "sell", label: "弱勢" },
             { key: "rank", label: "排行" },
           ].map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
