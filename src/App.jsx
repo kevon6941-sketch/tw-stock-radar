@@ -893,6 +893,244 @@ function getSector(code) {
 
 const SECTOR_LIST = ["全部", "電子", "金融保險", "航運", "鋼鐵", "塑膠", "生技醫療", "食品", "營建", "汽車", "紡織", "電機機械", "觀光餐旅", "貿易百貨", "水泥", "橡膠", "造紙", "玻璃陶瓷", "電器電纜", "其他"];
 
+// --- 走勢圖（折線 + 月線 + 量能）---
+function TrendChart({ data, height = 250 }) {
+  if (!data || data.length < 2) return null;
+
+  const w = 360, padL = 6, padR = 8, padT = 6;
+  const priceH = 120, volH = 46, gap = 26, dateH = 30;
+  const cw = w - padL - padR;
+
+  const closes = data.map(d => d.close);
+  const maxP = Math.max(...closes), minP = Math.min(...closes);
+  const padding = (maxP - minP) * 0.12 || 1;
+  const hi = maxP + padding, lo = minP - padding;
+  const y = v => padT + priceH - ((v - lo) / (hi - lo)) * priceH;
+  const x = i => padL + (i / (data.length - 1)) * (cw - 46);
+
+  // 月線（20MA）
+  const ma20 = data.map((_, i) => {
+    const n = Math.min(20, i + 1);
+    return data.slice(i - n + 1, i + 1).reduce((s, d) => s + d.close, 0) / n;
+  });
+
+  const linePath = data.map((d, i) => `${x(i)},${y(d.close)}`).join(" ");
+  const areaPath = `M${x(0)},${padT + priceH} L${linePath.split(" ").join(" L")} L${x(data.length - 1)},${padT + priceH} Z`;
+  const maPath = ma20.map((v, i) => `${x(i)},${y(v)}`).join(" ");
+
+  const last = data[data.length - 1];
+  const first = data[0];
+  const periodPct = ((last.close - first.close) / first.close) * 100;
+  const up = periodPct >= 0;
+  const lineCol = up ? "#f97316" : "#22c55e";
+
+  // 量能
+  const vols = data.map(d => d.volume || 0);
+  const maxV = Math.max(...vols) || 1;
+  const avgV = vols.reduce((s, v) => s + v, 0) / vols.length;
+  const volTop = padT + priceH + gap;
+  const volY = v => volTop + volH - (v / maxV) * volH;
+  const bw = Math.max(2, ((cw - 46) / data.length) * 0.62);
+
+  // 月線位置關係
+  const lastMA = ma20[ma20.length - 1];
+  const aboveMA = last.close >= lastMA;
+
+  const dateIdx = [0, Math.floor(data.length / 3), Math.floor((data.length * 2) / 3), data.length - 1];
+
+  return (
+    <svg viewBox={`0 0 ${w} ${height}`} style={{ width: "100%", display: "block" }}>
+      <defs>
+        <linearGradient id={`grad-${lineCol.slice(1)}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={lineCol} stopOpacity="0.28" />
+          <stop offset="100%" stopColor={lineCol} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+
+      {/* 區間與月線狀態 */}
+      <text x={padL} y={padT + 2} fill="#999" fontSize="10.5">
+        區間 {minP.toFixed(2)} – {maxP.toFixed(2)}
+      </text>
+      <text x={padL + 108} y={padT + 2} fill={up ? "#f97316" : "#22c55e"} fontSize="10.5" fontWeight="700">
+        {up ? "+" : ""}{periodPct.toFixed(1)}%
+      </text>
+      <text x={w - padR} y={padT + 2} fill={aboveMA ? "#f97316" : "#22c55e"} fontSize="10.5" fontWeight="600" textAnchor="end">
+        {aboveMA ? "站上月線 ↑" : "跌破月線 ↓"}
+      </text>
+
+      {/* 面積 + 走勢線 */}
+      <path d={areaPath} fill={`url(#grad-${lineCol.slice(1)})`} />
+      <polyline points={linePath} fill="none" stroke={lineCol} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+
+      {/* 月線 */}
+      <polyline points={maPath} fill="none" stroke="#eab308" strokeWidth="1.3" strokeDasharray="3,3" opacity="0.85" />
+      <text x={x(1)} y={y(ma20[1]) - 6} fill="#eab308" fontSize="10">月線</text>
+
+      {/* 現價標示 */}
+      <circle cx={x(data.length - 1)} cy={y(last.close)} r="3.5" fill={lineCol} />
+      <text x={x(data.length - 1) + 7} y={y(last.close) - 7} fill={lineCol} fontSize="14" fontWeight="700">
+        {last.close.toFixed(2)}
+      </text>
+
+      {/* 量能 */}
+      <text x={padL} y={volTop - 8} fill="#bbb" fontSize="10.5">成交量（張）</text>
+      {data.map((d, i) => {
+        const vUp = d.close >= d.open;
+        const vy = volY(d.volume || 0);
+        return (
+          <rect key={i} x={x(i) - bw / 2} y={vy} width={bw}
+            height={Math.max(1, volTop + volH - vy)}
+            fill={vUp ? "#f97316" : "#22c55e"} opacity="0.75" rx="0.8" />
+        );
+      })}
+      {/* 均量虛線 */}
+      <line x1={padL} y1={volY(avgV)} x2={padL + cw - 46} y2={volY(avgV)}
+        stroke="#666" strokeWidth="0.9" strokeDasharray="2,3" />
+
+      {/* 圖例 */}
+      <g transform={`translate(${padL}, ${volTop + volH + 13})`}>
+        <rect x="0" y="-7" width="8" height="8" fill="#f97316" rx="1" />
+        <text x="12" y="0" fill="#bbb" fontSize="10">上漲量</text>
+        <rect x="58" y="-7" width="8" height="8" fill="#22c55e" rx="1" />
+        <text x="70" y="0" fill="#bbb" fontSize="10">下跌量</text>
+        <line x1="118" y1="-3" x2="132" y2="-3" stroke="#666" strokeWidth="1" strokeDasharray="2,2" />
+        <text x="137" y="0" fill="#bbb" fontSize="10">均量</text>
+      </g>
+
+      {/* 日期軸 */}
+      {dateIdx.map((di, k) => {
+        const anchor = k === 0 ? "start" : k === dateIdx.length - 1 ? "end" : "middle";
+        const px = k === 0 ? padL : k === dateIdx.length - 1 ? padL + cw - 46 : x(di);
+        const daysAgo = data.length - 1 - di;
+        return (
+          <g key={k}>
+            <text x={px} y={height - 14} fill="#999" fontSize="10" textAnchor={anchor}>
+              {daysAgo === 0 ? "現在" : `${daysAgo}日前`}
+            </text>
+            <text x={px} y={height - 2} fill="#ccc" fontSize="10.5" textAnchor={anchor}>
+              {(data[di]?.date || "").slice(-5).replace("/", "/")}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// --- 關鍵數據列 ---
+function DataRow({ label, value, color, sub, last }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "11px 2px", borderBottom: last ? "none" : "1px solid #1a1a1a",
+    }}>
+      <span style={{ fontSize: 15, color: "#ddd" }}>{label}</span>
+      <div style={{ textAlign: "right" }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: color || "#e5e5e5" }}>{value}</div>
+        {sub && <div style={{ fontSize: 12, color: "#999", marginTop: 1 }}>{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
+// --- 個股資料面板（走勢 + 關鍵數據）---
+function StockPanel({ code, name, hist, live }) {
+  if (!hist || hist.length < 2) return null;
+  const last = hist[hist.length - 1];
+  const prev = hist[hist.length - 2];
+  const dayChange = last.close - prev.close;
+  const dayPct = (dayChange / prev.close) * 100;
+  const col = dayPct >= 0 ? "#f97316" : "#22c55e";
+
+  const vols = hist.map(h => h.volume || 0);
+  const avg20 = vols.slice(-20).reduce((s, v) => s + v, 0) / Math.min(20, vols.length);
+  const volRatio = avg20 > 0 ? last.volume / avg20 : 1;
+
+  const ma20 = hist.slice(-20).reduce((s, d) => s + d.close, 0) / Math.min(20, hist.length);
+  const bias = ((last.close - ma20) / ma20) * 100;
+
+  const high20 = Math.max(...hist.slice(-20).map(d => d.high));
+  const low20 = Math.min(...hist.slice(-20).map(d => d.low));
+
+  const themes = getThemes(code);
+
+  return (
+    <div style={{ background: "#0d0d0d", borderRadius: 10, padding: 12, marginBottom: 10 }}>
+      {/* 標題與題材 */}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span style={{ fontSize: 22, fontWeight: 800, color: "#e5e5e5" }}>{code}</span>
+          <span style={{ fontSize: 16, color: "#ccc" }}>{name}</span>
+        </div>
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 6 }}>
+          <span style={{ padding: "3px 10px", borderRadius: 12, fontSize: 12, border: "1px solid #2a2a2a", color: "#bbb" }}>
+            {getSector(code)}
+          </span>
+          {themes.map(t => (
+            <span key={t} style={{ padding: "3px 10px", borderRadius: 12, fontSize: 12, border: "1px solid #2a2a2a", color: "#bbb" }}>{t}</span>
+          ))}
+        </div>
+      </div>
+
+      {/* 走勢圖 */}
+      <div style={{ borderTop: "1px solid #1a1a1a", paddingTop: 10, marginBottom: 6 }}>
+        <div style={{ fontSize: 15, fontWeight: 600, color: "#e5e5e5", marginBottom: 6 }}>
+          近 {hist.length} 日股價走勢
+        </div>
+        <TrendChart data={hist} />
+      </div>
+
+      {/* 關鍵數據 */}
+      <div style={{ borderTop: "1px solid #1a1a1a", marginTop: 8 }}>
+        <DataRow label="當日漲跌"
+          value={`${prev.close.toFixed(2)} → ${last.close.toFixed(2)}`}
+          sub={`${dayPct >= 0 ? "+" : ""}${dayPct.toFixed(2)}%`}
+          color={col} />
+        <DataRow label="當日量能"
+          value={`${Math.round(last.volume / 1000).toLocaleString()} 張`}
+          sub={`${volRatio.toFixed(1)} 倍於 20 日均量`}
+          color={volRatio >= 1.8 ? "#f59e0b" : "#e5e5e5"} />
+        <DataRow label="月線位置"
+          value={`${ma20.toFixed(2)}`}
+          sub={`${bias >= 0 ? "高出" : "低於"} ${Math.abs(bias).toFixed(1)}%`}
+          color={bias >= 0 ? "#f97316" : "#22c55e"} />
+        <DataRow label="近 20 日區間"
+          value={`${low20.toFixed(2)} – ${high20.toFixed(2)}`}
+          sub={`現價位於 ${(((last.close - low20) / (high20 - low20)) * 100).toFixed(0)}% 位置`}
+          last />
+      </div>
+    </div>
+  );
+}
+
+// --- 走勢圖 / K 線切換 ---
+function ChartToggle({ data }) {
+  const [mode, setMode] = useState("none");
+  if (!data?.length) return null;
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <button onClick={() => setMode(m => m === "kline" ? "none" : "kline")}
+        style={{ width: "100%", padding: "8px 0", borderRadius: 8, border: "1px solid #2a2a2a",
+          background: "#111", color: "#999", fontSize: 13, cursor: "pointer" }}>
+        {mode === "kline" ? "收合 K 線圖" : "切換為 K 線圖"}
+      </button>
+      {mode === "kline" && (
+        <div style={{ background: "#0a0a0a", borderRadius: 8, padding: "10px 4px 6px", marginTop: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 8px", marginBottom: 4 }}>
+            <span style={{ fontSize: 13, color: "#ccc", fontWeight: 600 }}>K 線圖</span>
+            <span style={{ fontSize: 11, color: "#999" }}>
+              <span style={{ color: "#ef4444" }}>■</span> 紅K　
+              <span style={{ color: "#22c55e" }}>■</span> 黑K　
+              <span style={{ color: "#f59e0b" }}>—</span> 5MA
+            </span>
+          </div>
+          <KLineChart data={data} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // --- K 線圖元件 ---
 function KLineChart({ data, height = 210 }) {
   if (!data || data.length < 2) return null;
@@ -1994,7 +2232,7 @@ function TabWatchlist({ watchlist, apiKey, priceMap }) {
     setWLoadingHist(code);
     try {
       const d = await fetchStockHistory(code);
-      setWHistory(prev => ({ ...prev, [code]: d.slice(-20) }));
+      setWHistory(prev => ({ ...prev, [code]: d.slice(-30) }));
     } catch {
       setWHistory(prev => ({ ...prev, [code]: [] }));
     }
@@ -2182,17 +2420,8 @@ ${ctx}
                       </button>
                     ) : wHistory[item.id].length > 0 ? (
                       <>
-                        <div style={{ background: "#0a0a0a", borderRadius: 8, padding: "10px 4px 6px", marginBottom: 10 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 8px", marginBottom: 4 }}>
-                            <span style={{ fontSize: 13, color: "#ccc", fontWeight: 600 }}>近 20 日 K 線</span>
-                            <span style={{ fontSize: 11, color: "#999" }}>
-                              <span style={{ color: "#ef4444" }}>■</span> 紅K　
-                              <span style={{ color: "#22c55e" }}>■</span> 黑K　
-                              <span style={{ color: "#f59e0b" }}>—</span> 5MA
-                            </span>
-                          </div>
-                          <KLineChart data={wHistory[item.id]} />
-                        </div>
+                        <StockPanel code={item.id} name={item.name} hist={wHistory[item.id]} />
+                        <ChartToggle data={wHistory[item.id]} />
                         {wHistory[item.id].length >= 10 && (() => {
                           const lv = calcLevels(wHistory[item.id], null);
                           return (
@@ -2384,7 +2613,7 @@ function TabScan({ mode, watchlist, scanState }) {
     setLoadingHist(code);
     try {
       const d = await fetchStockHistory(code);
-      setHistory(prev => ({ ...prev, [code]: d.slice(-20) }));
+      setHistory(prev => ({ ...prev, [code]: d.slice(-30) }));
     } catch {
       setHistory(prev => ({ ...prev, [code]: [] }));
     }
@@ -2464,7 +2693,7 @@ function TabScan({ mode, watchlist, scanState }) {
           const a = analyzeTechnical(hist);
           if (a) {
             results[s.id] = a;
-            setHistory(prev => ({ ...prev, [s.id]: hist.slice(-20) }));
+            setHistory(prev => ({ ...prev, [s.id]: hist.slice(-30) }));
           } else {
             failed++;
           }
@@ -2791,19 +3020,12 @@ function TabScan({ mode, watchlist, scanState }) {
                       </button>
                     )}
 
-                    {/* K 線圖（優先顯示）*/}
+                    {/* 走勢與關鍵數據 */}
                     {history[stock.id]?.length > 0 && (
-                      <div style={{ background: "#0a0a0a", borderRadius: 8, padding: "10px 4px 6px", marginBottom: 10 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 8px", marginBottom: 4 }}>
-                          <span style={{ fontSize: 13, color: "#ccc", fontWeight: 600 }}>近 20 日 K 線</span>
-                          <span style={{ fontSize: 11, color: "#999" }}>
-                            <span style={{ color: "#ef4444" }}>■</span> 紅K　
-                            <span style={{ color: "#22c55e" }}>■</span> 黑K　
-                            <span style={{ color: "#f59e0b" }}>—</span> 5MA
-                          </span>
-                        </div>
-                        <KLineChart data={history[stock.id]} />
-                      </div>
+                      <>
+                        <StockPanel code={stock.id} name={stock.name} hist={history[stock.id]} />
+                        <ChartToggle data={history[stock.id]} />
+                      </>
                     )}
 
                     {history[stock.id]?.length === 0 && (
