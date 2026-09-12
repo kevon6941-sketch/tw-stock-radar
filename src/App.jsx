@@ -105,6 +105,70 @@ function useWatchlist() {
   return { list, add, remove, has, update };
 }
 
+// --- TWSE 官方 API（免金鑰、真實資料）---
+const CORS_PROXIES = [
+  (u) => u,                                              // 直連（openapi 通常允許 CORS）
+  (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+  (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+];
+
+async function fetchTWSE(url) {
+  let lastErr;
+  for (const wrap of CORS_PROXIES) {
+    try {
+      const r = await fetch(wrap(url));
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return await r.json();
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error("無法連線證交所");
+}
+
+// 全上市個股當日收盤行情
+async function fetchAllStockPrices() {
+  const rows = await fetchTWSE("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL");
+  const map = {};
+  for (const r of rows) {
+    const code = r.Code || r.證券代號;
+    if (!code) continue;
+    const close = parseFloat(r.ClosingPrice || r.收盤價);
+    const diff = parseFloat(r.Change || r.漲跌價差);
+    const open = parseFloat(r.OpeningPrice || r.開盤價);
+    if (!isFinite(close)) continue;
+    const prev = isFinite(diff) ? close - diff : null;
+    map[code] = {
+      code,
+      name: r.Name || r.證券名稱 || "",
+      close,
+      open: isFinite(open) ? open : null,
+      high: parseFloat(r.HighestPrice || r.最高價) || null,
+      low: parseFloat(r.LowestPrice || r.最低價) || null,
+      change: isFinite(diff) ? diff : null,
+      pct: prev && isFinite(diff) ? ((diff / prev) * 100) : null,
+      volume: parseInt((r.TradeVolume || r.成交股數 || "0").toString().replace(/,/g, "")) || 0,
+    };
+  }
+  return map;
+}
+
+// 加權指數
+async function fetchTaiex() {
+  const rows = await fetchTWSE("https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX");
+  const row = rows.find(r => (r.指數 || r.Index || "").includes("發行量加權股價指數"));
+  if (!row) return null;
+  const close = row.收盤指數 || row.ClosingIndex;
+  const sign = row.漲跌 || row.Direction || "";
+  const pts = row.漲跌點數 || row.Change || "";
+  const pct = row.漲跌百分比 || row.ChangePercent || "";
+  const neg = sign.includes("-");
+  return {
+    value: parseFloat(String(close).replace(/,/g, "")).toLocaleString("en-US", { maximumFractionDigits: 2 }),
+    change: (neg ? "-" : "+") + pts,
+    pct: (neg ? "-" : "+") + pct + "%",
+    time: new Date().toLocaleString("zh-TW"),
+  };
+}
+
 // --- API Key management ---
 function useApiKey() {
   const [key, setKey] = useState(() => {
@@ -641,19 +705,13 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
           </div>
           {lastScan && <div style={{ fontSize: 13, color: "#999", marginTop: 2 }}>上次掃描：{lastScan}</div>}
         </div>
-        <button onClick={scan} disabled={loading || !apiKey.hasKey}
+        <button onClick={scan} disabled={loading}
           style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: loading ? "#333" : "linear-gradient(135deg, #ef4444, #f97316)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: loading ? "wait" : "pointer" }}>
           {loading ? "掃描中…" : stocks.length > 0 ? "🔄 重新掃描" : "🔍 開始掃描"}
         </button>
       </div>
 
-      {/* No API key */}
-      {!apiKey.hasKey && (
-        <div style={{ padding: 30, textAlign: "center", background: "#111", borderRadius: 12, border: "1px solid #1e1e1e" }}>
-          <div style={{ fontSize: 28, marginBottom: 8 }}>🔑</div>
-          <div style={{ fontSize: 16, color: "#f59e0b" }}>請先到 ⚙️ 設定 API Key</div>
-        </div>
-      )}
+
 
       {/* Loading */}
       {loading && (
@@ -727,7 +785,7 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
       )}
 
       {/* Empty state */}
-      {!loading && stocks.length === 0 && apiKey.hasKey && (
+      {!loading && stocks.length === 0 && (
         <div style={{ padding: 40, textAlign: "center", background: "#111", borderRadius: 12, border: "1px solid #1e1e1e" }}>
           <div style={{ fontSize: 32, marginBottom: 10 }}>{mode === "buy" ? "📈" : "📉"}</div>
           <div style={{ fontSize: 16, color: "#ccc", marginBottom: 6 }}>尚未掃描</div>
@@ -766,89 +824,101 @@ export default function App() {
   });
 
   const fetchIndex = async () => {
-    if (!apiKey.hasKey) return;
     try {
-      const { text, grounded } = await callAI(`請搜尋台灣加權股價指數（TAIEX）今日最新收盤點數和漲跌幅。
-
-只回傳一行，格式如下，不要其他文字：
-點數|漲跌點|漲跌幅
-
-範例：
-24580.12|+125.30|+0.51%`, apiKey.key, apiKey.provider);
-      const line = text.split("\n").find(l => l.includes("|"));
-      if (line) {
-        const parts = line.replace(/^[\s\-\*>#`|]+/, "").replace(/\|$/, "").split("|").map(s => s.trim());
-        if (parts.length >= 3) {
-          const idx = { value: parts[0], change: parts[1], pct: parts[2], grounded, time: new Date().toLocaleString("zh-TW") };
-          setIndex(idx);
-          localStorage.setItem("tw-stock-index", JSON.stringify(idx));
-        }
+      const idx = await fetchTaiex();
+      if (idx) {
+        setIndex(idx);
+        localStorage.setItem("tw-stock-index", JSON.stringify(idx));
       }
     } catch {}
   };
 
   const scan = async () => {
-    if (!apiKey.hasKey || scanning) return;
+    if (scanning) return;
     setScanning(true); setScanError(""); setRawText("");
     try {
-      const { text, grounded } = await callAI(`請搜尋以下台股今日最新收盤價，並判斷該買還是該賣。
+      // 1. 先從證交所抓真實股價
+      const priceMap = await fetchAllStockPrices();
+      const rows = SCAN_STOCKS.map(s => {
+        const code = s.split(" ")[0];
+        const name = s.split(" ")[1];
+        const p = priceMap[code];
+        return p ? { ...p, name: p.name || name } : { code, name, close: null };
+      }).filter(r => r.close !== null);
 
-股票：${SCAN_STOCKS.join("、")}
+      if (rows.length === 0) {
+        setScanError("證交所尚無今日資料（可能未開盤或非交易日）");
+        setScanning(false);
+        return;
+      }
 
-輸出規則：每檔股票一行，欄位用半形直線 | 分隔，總共七個欄位，不要加編號、不要加項目符號、不要加表格線、不要有其他說明文字。
+      // 2. 先用真實股價建立基本結果（即使沒 API Key 也能看）
+      const base = rows.map(r => ({
+        id: r.code,
+        name: r.name,
+        price: r.close.toFixed(2),
+        change: (r.pct >= 0 ? "+" : "") + (r.pct?.toFixed(2) ?? "0") + "%",
+        verdict: "觀望",
+        reason: "",
+        sector: "",
+      }));
+      setStocks(base);
+      setGrounded(true);
 
-格式：代號|名稱|收盤價|漲跌幅|判定|理由|產業
+      // 3. 有 API Key 的話，請 AI 根據真實數據給判定
+      if (apiKey.hasKey) {
+        const dataLines = rows.map(r =>
+          `${r.code} ${r.name} 收盤${r.close} 開${r.open} 高${r.high} 低${r.low} 漲跌${r.change >= 0 ? "+" : ""}${r.change} (${r.pct?.toFixed(2)}%) 量${Math.round(r.volume / 1000)}張`
+        ).join("\n");
 
-範例輸出：
-2330|台積電|1050|+2.3%|買進|外資連買三天站穩均線|半導體
-2317|鴻海|235|-0.5%|觀望|量縮整理等待方向|電子代工
+        const { text } = await callAI(`以下是台灣證交所今日官方收盤資料，請根據這些真實數據給出買賣判定。
 
-判定欄位只能填這五種其中一種：強力買進、買進、觀望、賣出、強力賣出
+${dataLines}
 
-現在請直接輸出 16 行資料：`, apiKey.key, apiKey.provider);
+輸出規則：每檔一行，欄位用半形直線 | 分隔，不要加編號或項目符號，不要其他說明文字。
+格式：代號|判定|理由|產業
 
-      setRawText(text);
-      const parsed = [];
-      for (let rawLine of text.split("\n")) {
-        let line = rawLine.trim();
-        if (!line.includes("|")) continue;
-        line = line.replace(/^[\s\-\*>#`]+/, "").replace(/^\|/, "").replace(/\|$/, "").trim();
-        const parts = line.split("|").map(s => s.replace(/\*\*/g, "").trim());
-        if (parts.length < 4) continue;
-        const code = (parts[0].match(/\d{4}/) || [])[0];
-        if (!code) continue;
+判定只能填：強力買進、買進、觀望、賣出、強力賣出
+理由用一句話（20字內），根據當日漲跌幅、開高低收型態、成交量來判斷
+
+直接輸出 ${rows.length} 行：`, apiKey.key, apiKey.provider);
+
+        setRawText(text);
         const verdicts = ["強力買進", "強力賣出", "買進", "賣出", "觀望"];
-        let verdict = "觀望", vi = -1;
-        for (let i = 0; i < parts.length; i++) {
-          const f = verdicts.find(v => parts[i].includes(v));
-          if (f) { verdict = f; vi = i; break; }
+        const aiMap = {};
+        for (let rawLine of text.split("\n")) {
+          let line = rawLine.trim();
+          if (!line.includes("|")) continue;
+          line = line.replace(/^[\s\-\*>#`]+/, "").replace(/^\|/, "").replace(/\|$/, "").trim();
+          const parts = line.split("|").map(s => s.replace(/\*\*/g, "").trim());
+          const code = (parts[0].match(/\d{4}/) || [])[0];
+          if (!code) continue;
+          let verdict = "觀望", vi = -1;
+          for (let i = 0; i < parts.length; i++) {
+            const f = verdicts.find(v => parts[i].includes(v));
+            if (f) { verdict = f; vi = i; break; }
+          }
+          aiMap[code] = { verdict, reason: vi >= 0 ? (parts[vi + 1] || "") : "", sector: vi >= 0 ? (parts[vi + 2] || "") : "" };
         }
-        parsed.push({
-          id: code, name: parts[1] || code, price: parts[2] || "—", change: parts[3] || "", verdict,
-          reason: vi >= 0 ? (parts[vi + 1] || "") : (parts[5] || ""),
-          sector: vi >= 0 ? (parts[vi + 2] || "") : (parts[6] || ""),
-        });
-      }
-      if (parsed.length > 0) {
-        setStocks(parsed);
-        setGrounded(grounded);
-        localStorage.setItem("tw-stock-scan", JSON.stringify(parsed));
-        localStorage.setItem("tw-stock-grounded", grounded ? "1" : "0");
-        const t = new Date().toLocaleString("zh-TW");
-        setLastScan(t);
-        localStorage.setItem("tw-stock-scan-time", t);
+        const merged = base.map(b => aiMap[b.id] ? { ...b, ...aiMap[b.id] } : b);
+        setStocks(merged);
+        localStorage.setItem("tw-stock-scan", JSON.stringify(merged));
       } else {
-        setScanError("解析失敗，下方是 AI 的原始回覆");
+        localStorage.setItem("tw-stock-scan", JSON.stringify(base));
       }
+
+      localStorage.setItem("tw-stock-grounded", "1");
+      const t = new Date().toLocaleString("zh-TW");
+      setLastScan(t);
+      localStorage.setItem("tw-stock-scan-time", t);
     } catch (e) {
       setScanError("掃描失敗：" + e.message);
     }
     setScanning(false);
   };
 
-  // Auto-run on load when API key exists and data is stale (>30 min) or empty
+  // 進站自動抓證交所資料（不需 API Key）
   useEffect(() => {
-    if (!apiKey.hasKey) return;
     const stale = !lastScan || (Date.now() - new Date(lastScan).getTime()) > 30 * 60 * 1000;
     if (stocks.length === 0 || stale) scan();
     if (!index || stale) fetchIndex();
@@ -875,7 +945,7 @@ export default function App() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 14, color: "#aaa" }}>{now.toLocaleDateString("zh-TW", { year: "numeric", month: "long", day: "numeric", weekday: "long" })}</span>
-            {apiKey.hasKey && (
+            {(
               <button onClick={() => { scan(); fetchIndex(); }} disabled={scanning}
                 style={{ background: "none", border: "none", color: scanning ? "#666" : "#f97316", fontSize: 13, cursor: scanning ? "wait" : "pointer", padding: 0 }}>
                 {scanning ? "更新中…" : "🔄 全部更新"}
@@ -920,14 +990,11 @@ export default function App() {
           ))}
         </div>
 
-        {/* Ungrounded data warning */}
-        {stocks.length > 0 && !grounded && (
-          <div style={{ background: "#2a1510", border: "2px solid #f59e0b", borderRadius: 10, padding: 14, marginBottom: 12 }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", marginBottom: 6 }}>⚠️ 股價未經查證</div>
-            <div style={{ fontSize: 14, color: "#ddd", lineHeight: 1.8 }}>
-              這次回應沒有使用 Google 搜尋，數字可能是 AI 依訓練資料推測的，<strong style={{ color: "#f59e0b" }}>不是即時股價</strong>。
-              請勿依此下單，務必到券商 App 或證交所確認真實價格。
-            </div>
+        {/* Data source badge */}
+        {stocks.length > 0 && (
+          <div style={{ background: "#0d1f0d", border: "1px solid #16a34a44", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 13, color: "#86efac" }}>
+            ✅ 股價來自臺灣證券交易所官方 OpenAPI（每日約 16:00 更新收盤資料）
+            {!apiKey.hasKey && <span style={{ color: "#f59e0b" }}>　·　設定 ⚙️ API Key 可加上 AI 買賣判定</span>}
           </div>
         )}
 
