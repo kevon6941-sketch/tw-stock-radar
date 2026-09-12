@@ -442,6 +442,143 @@ function FilterRow({ label, options, value, onChange, last }) {
   );
 }
 
+// --- 真正的技術指標（需要歷史資料）---
+function calcMA(data, n) {
+  if (data.length < n) return null;
+  return data.slice(-n).reduce((s, d) => s + d.close, 0) / n;
+}
+
+function calcRSI(data, n = 14) {
+  if (data.length < n + 1) return null;
+  let gain = 0, loss = 0;
+  for (let i = data.length - n; i < data.length; i++) {
+    const diff = data[i].close - data[i - 1].close;
+    if (diff > 0) gain += diff; else loss -= diff;
+  }
+  if (loss === 0) return 100;
+  const rs = (gain / n) / (loss / n);
+  return 100 - 100 / (1 + rs);
+}
+
+function calcKD(data, n = 9) {
+  if (data.length < n) return null;
+  let k = 50, d = 50;
+  for (let i = n - 1; i < data.length; i++) {
+    const win = data.slice(i - n + 1, i + 1);
+    const high = Math.max(...win.map(x => x.high));
+    const low = Math.min(...win.map(x => x.low));
+    const rsv = high === low ? 50 : ((data[i].close - low) / (high - low)) * 100;
+    k = (2 / 3) * k + (1 / 3) * rsv;
+    d = (2 / 3) * d + (1 / 3) * k;
+  }
+  return { k, d };
+}
+
+function calcMACD(data) {
+  if (data.length < 26) return null;
+  const ema = (arr, n) => {
+    const mult = 2 / (n + 1);
+    let e = arr.slice(0, n).reduce((s, v) => s + v, 0) / n;
+    for (let i = n; i < arr.length; i++) e = (arr[i] - e) * mult + e;
+    return e;
+  };
+  const closes = data.map(d => d.close);
+  const difLine = [];
+  for (let i = 26; i <= closes.length; i++) {
+    const sub = closes.slice(0, i);
+    difLine.push(ema(sub, 12) - ema(sub, 26));
+  }
+  if (difLine.length < 9) return { dif: difLine[difLine.length - 1], macd: 0, osc: 0 };
+  const macd = ema(difLine, 9);
+  const dif = difLine[difLine.length - 1];
+  return { dif, macd, osc: dif - macd };
+}
+
+// 完整技術面評分（0-100）+ 買賣判定
+function analyzeTechnical(data) {
+  if (!data || data.length < 20) return null;
+  const last = data[data.length - 1];
+  const prev = data[data.length - 2];
+  const close = last.close;
+
+  const ma5 = calcMA(data, 5);
+  const ma10 = calcMA(data, 10);
+  const ma20 = calcMA(data, 20);
+  const rsi = calcRSI(data, 14);
+  const kd = calcKD(data, 9);
+  const macd = calcMACD(data);
+
+  let score = 0;
+  const signals = [];
+
+  // 1. 均線多空排列（權重最高）
+  if (ma5 && ma10 && ma20) {
+    if (ma5 > ma10 && ma10 > ma20) { score += 2.5; signals.push("均線多頭排列"); }
+    else if (ma5 < ma10 && ma10 < ma20) { score -= 2.5; signals.push("均線空頭排列"); }
+    if (close > ma20) { score += 1; signals.push("站上月線"); }
+    else { score -= 1; signals.push("跌破月線"); }
+    // 乖離過大警示（追高風險）
+    const bias = ((close - ma20) / ma20) * 100;
+    if (bias > 15) { score -= 1.5; signals.push("正乖離過大"); }
+    else if (bias < -15) { score += 1; signals.push("負乖離大可能反彈"); }
+  }
+
+  // 2. KD
+  if (kd) {
+    if (kd.k < 20 && kd.k > kd.d) { score += 2; signals.push("KD低檔黃金交叉"); }
+    else if (kd.k > 80 && kd.k < kd.d) { score -= 2; signals.push("KD高檔死亡交叉"); }
+    else if (kd.k > kd.d && kd.k < 70) { score += 1; signals.push("KD黃金交叉"); }
+    else if (kd.k < kd.d && kd.k > 30) { score -= 1; signals.push("KD死亡交叉"); }
+    if (kd.k > 85) { score -= 1; signals.push("KD超買"); }
+    if (kd.k < 15) { score += 1; signals.push("KD超賣"); }
+  }
+
+  // 3. RSI
+  if (rsi !== null) {
+    if (rsi > 75) { score -= 1.5; signals.push("RSI過熱"); }
+    else if (rsi < 25) { score += 1.5; signals.push("RSI超賣"); }
+    else if (rsi > 55) { score += 0.5; signals.push("RSI偏強"); }
+    else if (rsi < 45) { score -= 0.5; signals.push("RSI偏弱"); }
+  }
+
+  // 4. MACD
+  if (macd) {
+    if (macd.osc > 0 && macd.dif > 0) { score += 1.5; signals.push("MACD多方"); }
+    else if (macd.osc < 0 && macd.dif < 0) { score -= 1.5; signals.push("MACD空方"); }
+    else if (macd.osc > 0) { score += 0.5; signals.push("MACD轉強"); }
+    else { score -= 0.5; signals.push("MACD轉弱"); }
+  }
+
+  // 5. 量價關係
+  const avgVol = data.slice(-20).reduce((s, d) => s + d.volume, 0) / 20;
+  const volRatio = avgVol > 0 ? last.volume / avgVol : 1;
+  const priceUp = close > prev.close;
+  if (volRatio > 1.8 && priceUp) { score += 1.5; signals.push("帶量上攻"); }
+  else if (volRatio > 1.8 && !priceUp) { score -= 1.5; signals.push("爆量下殺"); }
+  else if (volRatio < 0.6 && !priceUp) { score += 0.5; signals.push("量縮止跌"); }
+  else if (volRatio < 0.6 && priceUp) { score -= 0.5; signals.push("量縮上漲乏力"); }
+
+  // 6. 近月相對位置
+  const monthHigh = Math.max(...data.slice(-20).map(d => d.high));
+  const monthLow = Math.min(...data.slice(-20).map(d => d.low));
+  const posInRange = monthHigh > monthLow ? (close - monthLow) / (monthHigh - monthLow) : 0.5;
+  if (posInRange > 0.95) { score += 0.5; signals.push("創月新高"); }
+  else if (posInRange < 0.05) { score -= 0.5; signals.push("創月新低"); }
+
+  let verdict;
+  if (score >= 6) verdict = "強力買進";
+  else if (score >= 2.5) verdict = "買進";
+  else if (score > -2.5) verdict = "觀望";
+  else if (score > -6) verdict = "賣出";
+  else verdict = "強力賣出";
+
+  return {
+    verdict, score,
+    reason: signals.slice(0, 4).join("、"),
+    indicators: { ma5, ma10, ma20, rsi, k: kd?.k, d: kd?.d, macd: macd?.osc, volRatio },
+  };
+}
+
 // --- 用證交所真實數據計算買賣訊號（不需 AI）---
 function calcVerdict(r) {
   let score = 0;
@@ -1229,6 +1366,10 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
   const [showFilters, setShowFilters] = useState(false);
   const [history, setHistory] = useState({});
   const [loadingHist, setLoadingHist] = useState(null);
+  const [deepResults, setDeepResults] = useState({});
+  const [deepRunning, setDeepRunning] = useState(false);
+  const [deepProgress, setDeepProgress] = useState({ done: 0, total: 0 });
+  const [useDeep, setUseDeep] = useState(false);
 
   const verdictColors = { "強力買進": "#dc2626", "買進": "#ef4444", "觀望": "#f59e0b", "賣出": "#22c55e", "強力賣出": "#16a34a" };
 
@@ -1244,7 +1385,49 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
     setLoadingHist(null);
   };
 
-  const matched = stocks.filter(s => {
+  const runDeepAnalysis = async () => {
+    setDeepRunning(true);
+    // 取當日訊號較明顯的前 40 檔做深度分析
+    const candidates = stocks
+      .filter(s => Math.abs(s.score ?? 0) >= 1.5)
+      .sort((a, b) => Math.abs(b.score ?? 0) - Math.abs(a.score ?? 0))
+      .slice(0, 40);
+
+    setDeepProgress({ done: 0, total: candidates.length });
+    const results = {};
+
+    // 分批並行，避免打爆代理
+    const BATCH = 4;
+    for (let i = 0; i < candidates.length; i += BATCH) {
+      const batch = candidates.slice(i, i + BATCH);
+      await Promise.all(batch.map(async (s) => {
+        try {
+          const hist = await fetchStockHistory(s.id);
+          const a = analyzeTechnical(hist);
+          if (a) {
+            results[s.id] = a;
+            setHistory(prev => ({ ...prev, [s.id]: hist.slice(-20) }));
+          }
+        } catch {}
+      }));
+      setDeepProgress({ done: Math.min(i + BATCH, candidates.length), total: candidates.length });
+      setDeepResults({ ...results });
+    }
+
+    setDeepResults(results);
+    setUseDeep(true);
+    setDeepRunning(false);
+  };
+
+  // 套用深度分析結果（若有）
+  const applyDeep = (s) => {
+    const d = deepResults[s.id];
+    if (useDeep && d) return { ...s, verdict: d.verdict, score: d.score, reason: d.reason, deep: d };
+    return s;
+  };
+
+  const matched = stocks.map(applyDeep).filter(s => {
+    if (useDeep && !deepResults[s.id]) return false;
     if (mode === "buy" && !(s.verdict === "買進" || s.verdict === "強力買進")) return false;
     if (mode === "sell" && !(s.verdict === "賣出" || s.verdict === "強力賣出")) return false;
     if (sector !== "全部" && getSector(s.id) !== sector) return false;
@@ -1313,6 +1496,45 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
               style={{ padding: "9px 14px", borderRadius: 8, border: `1px solid ${activeFilters ? "#f97316" : "#1e1e1e"}`, background: activeFilters ? "#1a1510" : "#111", color: activeFilters ? "#f97316" : "#888", fontSize: 14, cursor: "pointer", whiteSpace: "nowrap" }}>
               篩選{activeFilters ? ` ${activeFilters}` : ""}
             </button>
+          </div>
+
+          {/* 分析模式 */}
+          <div style={{ background: useDeep ? "#0d1f0d" : "#0d0d0d", border: `1px solid ${useDeep ? "#16a34a44" : "#1e1e1e"}`, borderRadius: 10, padding: 10, marginBottom: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: useDeep ? "#86efac" : "#ccc" }}>
+                  {useDeep ? "深度技術分析" : "當日 K 棒快篩"}
+                </div>
+                <div style={{ fontSize: 12, color: "#999", marginTop: 2, lineHeight: 1.6 }}>
+                  {useDeep
+                    ? `已分析 ${Object.keys(deepResults).length} 檔：均線排列、KD、RSI、MACD、量價`
+                    : "僅看今日漲跌與K棒型態，容易追高，建議跑深度分析"}
+                </div>
+              </div>
+              {!deepRunning && (
+                useDeep ? (
+                  <button onClick={() => setUseDeep(false)}
+                    style={{ padding: "7px 12px", borderRadius: 8, border: "1px solid #333", background: "#141414", color: "#999", fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>
+                    回快篩
+                  </button>
+                ) : (
+                  <button onClick={runDeepAnalysis} disabled={stocks.length === 0}
+                    style={{ padding: "8px 13px", borderRadius: 8, border: "none", background: "linear-gradient(135deg, #16a34a, #22c55e)", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+                    深度分析
+                  </button>
+                )
+              )}
+            </div>
+            {deepRunning && (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 13, color: "#f59e0b", marginBottom: 5 }}>
+                  抓取歷史資料計算指標中… {deepProgress.done} / {deepProgress.total}
+                </div>
+                <div style={{ height: 5, background: "#1a1a1a", borderRadius: 3 }}>
+                  <div style={{ height: 5, borderRadius: 3, background: "linear-gradient(90deg,#f59e0b,#22c55e)", width: `${deepProgress.total ? (deepProgress.done / deepProgress.total) * 100 : 0}%`, transition: "width 0.3s" }} />
+                </div>
+              </div>
+            )}
           </div>
 
           {showFilters && (
@@ -1433,6 +1655,42 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
                             <div style={{ fontSize: 14, fontWeight: 600, color: "#ddd" }}>{typeof v === "number" ? v.toFixed(2) : v}</div>
                           </div>
                         ))}
+                      </div>
+                    )}
+
+                    {/* 技術指標（深度分析後才有）*/}
+                    {stock.deep?.indicators && (
+                      <div style={{ background: "#0a0a0a", borderRadius: 8, padding: 10, marginBottom: 10 }}>
+                        <div style={{ fontSize: 13, color: "#86efac", marginBottom: 8 }}>技術指標</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
+                          {[
+                            ["5MA", stock.deep.indicators.ma5],
+                            ["10MA", stock.deep.indicators.ma10],
+                            ["20MA", stock.deep.indicators.ma20],
+                          ].map(([l, v]) => (
+                            <div key={l} style={{ textAlign: "center" }}>
+                              <div style={{ fontSize: 12, color: "#888" }}>{l}</div>
+                              <div style={{ fontSize: 14, fontWeight: 600, color: v && parseFloat(stock.price) >= v ? "#ef4444" : "#22c55e" }}>
+                                {v ? v.toFixed(2) : "—"}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6 }}>
+                          {[
+                            ["K", stock.deep.indicators.k, v => v?.toFixed(0), v => v > 80 ? "#ef4444" : v < 20 ? "#22c55e" : "#ddd"],
+                            ["D", stock.deep.indicators.d, v => v?.toFixed(0), v => v > 80 ? "#ef4444" : v < 20 ? "#22c55e" : "#ddd"],
+                            ["RSI", stock.deep.indicators.rsi, v => v?.toFixed(0), v => v > 70 ? "#ef4444" : v < 30 ? "#22c55e" : "#ddd"],
+                            ["量比", stock.deep.indicators.volRatio, v => v?.toFixed(1) + "x", v => v > 1.8 ? "#f59e0b" : "#ddd"],
+                          ].map(([l, v, fmt, col]) => (
+                            <div key={l} style={{ textAlign: "center" }}>
+                              <div style={{ fontSize: 12, color: "#888" }}>{l}</div>
+                              <div style={{ fontSize: 14, fontWeight: 600, color: v != null ? col(v) : "#888" }}>
+                                {v != null ? fmt(v) : "—"}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
 
