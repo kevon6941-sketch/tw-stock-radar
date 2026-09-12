@@ -95,6 +95,33 @@ function parseFinancialScores(text) {
   return scores;
 }
 
+// --- 由診斷結果解析出正確的股票代號 ---
+function resolveStock(result, stocks) {
+  const q = (result.query || "").trim();
+  const nameGuess = (result.stockName || "").replace(/\s*[（(]\d{4}[)）]/, "").trim();
+
+  // 1. 使用者直接輸入四碼代號
+  let code = (q.match(/^\d{4}$/) || [])[0];
+  // 2. AI 回覆的「名稱 (代號)」格式
+  if (!code) code = (result.stockName?.match(/\d{4}/) || [])[0];
+  // 3. 從技術面全文找四碼代號
+  if (!code) code = (result.techText?.match(/[（(](\d{4})[)）]/) || [])[1];
+  // 4. 用名稱到全市場清單反查
+  if (!code && stocks?.length) {
+    const key = nameGuess || q;
+    const hit = stocks.find(s => s.name === key)
+             || stocks.find(s => key && (s.name?.includes(key) || key.includes(s.name)));
+    if (hit) code = hit.id;
+  }
+  // 5. 查名稱：若已有代號，優先用全市場清單的正式名稱
+  let name = nameGuess || q;
+  if (code && stocks?.length) {
+    const hit = stocks.find(s => s.id === code);
+    if (hit?.name) name = hit.name;
+  }
+  return { code: code || q, name, resolved: !!code };
+}
+
 // --- Watchlist hook ---
 function useWatchlist() {
   const [list, setList] = useState(() => {
@@ -102,13 +129,35 @@ function useWatchlist() {
     catch { return []; }
   });
   useEffect(() => { localStorage.setItem("tw-stock-watchlist", JSON.stringify(list)); }, [list]);
+
+  const norm = (s) => (s || "").toString().trim();
+
   const add = (item) => setList(prev => {
-    if (prev.some(p => p.id === item.id)) return prev;
+    const id = norm(item.id), name = norm(item.name);
+    // 同代號或同名稱都視為重複
+    const dupIdx = prev.findIndex(p =>
+      norm(p.id) === id || (name && norm(p.name) === name)
+    );
+    if (dupIdx >= 0) {
+      // 已存在：若新資料帶了正確代號就補上去（修正舊的錯誤紀錄）
+      const copy = [...prev];
+      const old = copy[dupIdx];
+      copy[dupIdx] = {
+        ...old,
+        id: /^\d{4}$/.test(id) ? id : old.id,
+        name: name || old.name,
+      };
+      return copy;
+    }
     return [{ ...item, addedAt: new Date().toISOString() }, ...prev];
   });
-  const remove = (id) => setList(prev => prev.filter(p => p.id !== id));
-  const has = (id) => list.some(p => p.id === id);
-  const update = (id, data) => setList(prev => prev.map(p => p.id === id ? { ...p, ...data } : p));
+
+  const remove = (id) => setList(prev => prev.filter(p => norm(p.id) !== norm(id)));
+  const has = (idOrName) => {
+    const q = norm(idOrName);
+    return list.some(p => norm(p.id) === q || norm(p.name) === q);
+  };
+  const update = (id, data) => setList(prev => prev.map(p => norm(p.id) === norm(id) ? { ...p, ...data } : p));
   return { list, add, remove, has, update };
 }
 
@@ -934,7 +983,7 @@ function SettingsPanel({ apiKey, onClose }) {
 // ====================================
 // TAB 1: AI 個股診斷 + 財報健檢
 // ====================================
-function TabDiagnosis({ watchlist, apiKey }) {
+function TabDiagnosis({ watchlist, apiKey, stocks }) {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState("");
@@ -1118,15 +1167,23 @@ function TabDiagnosis({ watchlist, apiKey }) {
 
           {/* Add to watchlist button */}
           {(() => {
-            const wlCode = (result.stockName?.match(/\d{4}/) || result.query.match(/\d{4}/) || [])[0] || result.query;
-            const wlName = result.stockName?.replace(/\s*[（(]\d{4}[)）]/, "").trim() || result.query;
-            const added = watchlist.has(wlCode);
+            const resolved = resolveStock(result, stocks);
+            const wlCode = resolved.code;
+            const wlName = resolved.name;
+            const added = watchlist.has(wlCode) || watchlist.has(wlName);
             return (
-              <button onClick={() => watchlist.add({ id: wlCode, name: wlName, verdict: result.verdict, time: new Date().toISOString(), techText: result.techText, finText: result.finText })}
-                disabled={added}
-                style={{ width: "100%", padding: "8px 0", borderRadius: 8, border: "1px solid #333", background: added ? "#1a1a1a" : "#141414", color: added ? "#555" : "#f59e0b", fontSize: 16, fontWeight: 600, cursor: "pointer", marginBottom: 12 }}>
-                {added ? "已加入自選股" : "加入自選股追蹤"}
-              </button>
+              <>
+                <button onClick={() => watchlist.add({ id: wlCode, name: wlName, verdict: result.verdict, time: new Date().toISOString(), techText: result.techText, finText: result.finText })}
+                  disabled={added}
+                  style={{ width: "100%", padding: "8px 0", borderRadius: 8, border: "1px solid #333", background: added ? "#1a1a1a" : "#141414", color: added ? "#555" : "#f59e0b", fontSize: 16, fontWeight: 600, cursor: "pointer", marginBottom: resolved.resolved ? 12 : 6 }}>
+                  {added ? "已加入自選股" : `加入自選股追蹤${resolved.resolved ? `（${wlName} ${wlCode}）` : ""}`}
+                </button>
+                {!resolved.resolved && (
+                  <div style={{ fontSize: 13, color: "#fcd34d", background: "#2a1510", border: "1px solid #f59e0b44", borderRadius: 8, padding: "8px 10px", marginBottom: 12, lineHeight: 1.6 }}>
+                    找不到對應的股票代號，加入後可能無法顯示股價。建議改用四碼代號查詢（例如 2330），或先到「買進／排行」頁掃描一次。
+                  </div>
+                )}
+              </>
             );
           })()}
 
@@ -1229,13 +1286,39 @@ function TabWatchlist({ watchlist, apiKey, priceMap }) {
     setPriceError("");
     try {
       const full = await fetchAllStockPrices();
+
+      // 修復舊紀錄：ID 不是四碼代號的，用名稱反查補正
+      const allRows = Object.values(full);
+      watchlist.list.forEach(w => {
+        if (/^\d{4}$/.test(String(w.id))) return;
+        const key = (w.name || w.id || "").trim();
+        const hit = allRows.find(r => r.name === key)
+                 || allRows.find(r => key && r.name && (r.name.includes(key) || key.includes(r.name)));
+        if (hit) {
+          watchlist.remove(w.id);
+          watchlist.add({ ...w, id: hit.code, name: hit.name });
+        }
+      });
+
       const slim = {};
-      watchlist.list.forEach(w => { if (full[w.id]) slim[w.id] = full[w.id]; });
-      const missing = watchlist.list.filter(w => !full[w.id]);
+      watchlist.list.forEach(w => {
+        if (full[w.id]) { slim[w.id] = full[w.id]; return; }
+        // 也把剛修復的代號一併帶入
+        const key = (w.name || "").trim();
+        const hit = allRows.find(r => r.name === key);
+        if (hit) slim[hit.code] = hit;
+      });
+
+      const missing = watchlist.list.filter(w => {
+        if (full[w.id]) return false;
+        const key = (w.name || "").trim();
+        return !allRows.some(r => r.name === key);
+      });
+
       setLocalPrices(slim);
       try { localStorage.setItem("tw-stock-pricemap", JSON.stringify({ ...(priceMap || {}), ...slim })); } catch {}
       if (missing.length > 0) {
-        setPriceError(`${missing.map(m => m.name || m.id).join("、")} 今日無交易資料`);
+        setPriceError(`${missing.map(m => m.name || m.id).join("、")} 查無對應的上市股票資料`);
       }
     } catch (e) {
       setPriceError("更新失敗：" + e.message);
@@ -2221,7 +2304,7 @@ export default function App() {
         {showSettings && <SettingsPanel apiKey={apiKey} onClose={() => setShowSettings(false)} />}
 
         {/* Tab content */}
-        {tab === "search" && <TabDiagnosis watchlist={watchlist} apiKey={apiKey} />}
+        {tab === "search" && <TabDiagnosis watchlist={watchlist} apiKey={apiKey} stocks={stocks} />}
         {tab === "watchlist" && <TabWatchlist watchlist={watchlist} apiKey={apiKey} priceMap={priceMap} />}
         {tab === "buy" && <TabScan mode="buy" watchlist={watchlist} scanState={scanState} />}
         {tab === "sell" && <TabScan mode="sell" watchlist={watchlist} scanState={scanState} />}
