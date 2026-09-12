@@ -1,10 +1,10 @@
-name: Fetch TWSE Data
+name: Fetch Market Data
 
 on:
   schedule:
-    # 台灣時間每日 16:30 與 21:00（UTC 08:30 / 13:00）
     - cron: '30 8 * * 1-5'
     - cron: '0 13 * * 1-5'
+    - cron: '0 22 * * 1-5'
   workflow_dispatch:
 
 permissions:
@@ -19,25 +19,49 @@ jobs:
       - name: Fetch TWSE open data
         run: |
           mkdir -p public/data
-          echo "抓取個股收盤行情…"
           curl -sSL --retry 3 --retry-delay 5 \
             "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL" \
             -o public/data/stock_day_all.json
-          echo "抓取加權指數…"
           curl -sSL --retry 3 --retry-delay 5 \
             "https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX" \
             -o public/data/mi_index.json
-          echo "抓取本益比殖利率…"
           curl -sSL --retry 3 --retry-delay 5 \
             "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL" \
             -o public/data/bwibbu_all.json || true
-          date -u +"%Y-%m-%dT%H:%M:%SZ" > public/data/updated_at.txt
-          ls -la public/data/
+
+      - name: Fetch US market data (Stooq, keyless)
+        run: |
+          SYMBOLS="nvda.us amd.us avgo.us mu.us intc.us tsm.us aapl.us msft.us googl.us amzn.us meta.us tsla.us smci.us dell.us qcom.us arm.us mrvl.us asml.us amat.us lrcx.us ^spx ^ndq ^dji ^sox"
+          echo "[" > public/data/us_market.json
+          FIRST=1
+          for S in $SYMBOLS; do
+            ENC=$(printf %s "$S" | sed 's/\^/%5E/g')
+            CSV=$(curl -sSL --max-time 20 "https://stooq.com/q/l/?s=${ENC}&f=sd2t2ohlcv&h&e=csv" | tail -n +2)
+            [ -z "$CSV" ] && continue
+            SYM=$(echo "$CSV" | cut -d, -f1)
+            DATE=$(echo "$CSV" | cut -d, -f2)
+            OPEN=$(echo "$CSV" | cut -d, -f4)
+            HIGH=$(echo "$CSV" | cut -d, -f5)
+            LOW=$(echo "$CSV" | cut -d, -f6)
+            CLOSE=$(echo "$CSV" | cut -d, -f7)
+            VOL=$(echo "$CSV" | cut -d, -f8)
+            case "$CLOSE" in ''|N/D) continue;; esac
+            [ $FIRST -eq 0 ] && echo "," >> public/data/us_market.json
+            FIRST=0
+            printf '{"symbol":"%s","date":"%s","open":%s,"high":%s,"low":%s,"close":%s,"volume":%s}' \
+              "$SYM" "$DATE" "${OPEN:-0}" "${HIGH:-0}" "${LOW:-0}" "$CLOSE" "${VOL:-0}" \
+              >> public/data/us_market.json
+          done
+          echo "]" >> public/data/us_market.json
+          cat public/data/us_market.json
+
+      - name: Timestamp
+        run: date -u +"%Y-%m-%dT%H:%M:%SZ" > public/data/updated_at.txt
 
       - name: Commit if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add public/data
-          git diff --staged --quiet || git commit -m "chore: 更新證交所資料 $(date -u +%Y-%m-%d)"
+          git diff --staged --quiet || git commit -m "chore: 更新市場資料 $(date -u +%Y-%m-%d)"
           git push
