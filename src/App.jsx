@@ -2170,7 +2170,12 @@ ${ctx}
                     )}
 
                     {/* K 線與進出場計畫 */}
-                    {wHistory[item.id] === undefined ? (
+                    {!/^\d{4}$/.test(String(item.id)) ? (
+                      <div style={{ fontSize: 13, color: "#fcd34d", background: "#2a1510", borderRadius: 8, padding: "9px 11px", marginBottom: 10, lineHeight: 1.7 }}>
+                        這筆紀錄沒有正確的股票代號（目前是「{item.id}」），無法載入 K 線。
+                        請按上方「更新股價」讓系統自動修正，或移除後重新加入。
+                      </div>
+                    ) : wHistory[item.id] === undefined ? (
                       <button onClick={() => loadWHistory(item.id)} disabled={wLoadingHist === item.id}
                         style={{ width: "100%", padding: "10px 0", borderRadius: 8, border: "1px solid #2a2a2a", background: "#111", color: "#f97316", fontSize: 15, fontWeight: 600, cursor: "pointer", marginBottom: 10 }}>
                         {wLoadingHist === item.id ? "載入中…" : "看 K 線圖 / 支撐壓力 / 進出場計畫"}
@@ -2193,7 +2198,7 @@ ${ctx}
                           return (
                             <>
                               <LevelsPanel levels={lv} />
-                              <TradePlanner stock={{ id: item.id, price: live?.price, volume: live?.volume, risk: live?.risk }} levels={lv} />
+                              <TradePlanner stock={{ id: item.id, price: live?.price ?? wHistory[item.id]?.[wHistory[item.id].length - 1]?.close, volume: live?.volume, risk: live?.risk }} levels={lv} />
                             </>
                           );
                         })()}
