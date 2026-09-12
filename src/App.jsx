@@ -95,6 +95,200 @@ function parseFinancialScores(text) {
   return scores;
 }
 
+// --- 美股連動對應表 ---
+// 美股代號 → { 中文名, 連動的台股題材, 說明 }
+const US_LINKS = {
+  "NVDA": { name: "NVIDIA", themes: ["AI伺服器", "AI晶片/IP"], note: "AI 晶片龍頭，台廠代工與供應鏈直接受惠" },
+  "AMD":  { name: "AMD", themes: ["AI伺服器", "半導體"], note: "資料中心 CPU/GPU，牽動伺服器供應鏈" },
+  "AVGO": { name: "博通", themes: ["AI晶片/IP", "網通/光通訊"], note: "客製化 ASIC 與網通晶片" },
+  "MU":   { name: "美光", themes: ["半導體"], note: "記憶體報價指標" },
+  "INTC": { name: "英特爾", themes: ["半導體", "AI伺服器"], note: "PC 與伺服器平台需求" },
+  "TSM":  { name: "台積電ADR", themes: ["半導體", "AI晶片/IP"], note: "台積電 ADR，通常領先反映台股走勢" },
+  "SMCI": { name: "美超微", themes: ["AI伺服器"], note: "AI 伺服器整機廠，台廠是其主要代工夥伴" },
+  "DELL": { name: "戴爾", themes: ["AI伺服器"], note: "伺服器出貨動能" },
+  "AAPL": { name: "蘋果", themes: ["半導體"], note: "蘋概股供應鏈" },
+  "QCOM": { name: "高通", themes: ["半導體", "AI晶片/IP"], note: "手機晶片需求" },
+  "ARM":  { name: "安謀", themes: ["AI晶片/IP"], note: "IP 授權指標" },
+  "MRVL": { name: "邁威爾", themes: ["AI晶片/IP", "網通/光通訊"], note: "資料中心互連晶片" },
+  "ASML": { name: "艾斯摩爾", themes: ["半導體"], note: "曝光機設備，反映晶圓廠資本支出" },
+  "AMAT": { name: "應用材料", themes: ["半導體"], note: "半導體設備需求" },
+  "LRCX": { name: "科林研發", themes: ["半導體"], note: "蝕刻設備需求" },
+  "MSFT": { name: "微軟", themes: ["AI伺服器"], note: "雲端資本支出" },
+  "GOOGL":{ name: "Alphabet", themes: ["AI伺服器", "AI晶片/IP"], note: "自研 TPU 與雲端投資" },
+  "AMZN": { name: "亞馬遜", themes: ["AI伺服器"], note: "AWS 資本支出" },
+  "META": { name: "Meta", themes: ["AI伺服器"], note: "AI 基礎建設投資" },
+  "TSLA": { name: "特斯拉", themes: ["電動車"], note: "電動車供應鏈" },
+};
+
+const US_INDEXES = {
+  "^SPX": { name: "標普500", note: "美股大盤" },
+  "^NDQ": { name: "那斯達克", note: "科技股指標" },
+  "^DJI": { name: "道瓊", note: "傳產藍籌" },
+  "^SOX": { name: "費城半導體", note: "與台股電子股連動最強" },
+};
+
+async function fetchUSMarket() {
+  const base = import.meta.env.BASE_URL || "/";
+  const r = await fetch(`${base}data/us_market.json`);
+  if (!r.ok) throw new Error("讀取失敗");
+  const rows = await r.json();
+  if (!Array.isArray(rows) || rows.length === 0) throw new Error("無資料");
+  return rows.map(x => {
+    const sym = String(x.symbol || "").toUpperCase().replace(/\.US$/, "");
+    const pct = x.open > 0 ? ((x.close - x.open) / x.open) * 100 : null;
+    return { ...x, sym, pct };
+  });
+}
+
+// 由美股表現推導出台股題材的連動提示
+function buildLinkageHints(usRows) {
+  if (!usRows?.length) return { hints: [], themeBias: {} };
+  const hints = [];
+  const themeBias = {};   // 題材 → { score, drivers: [] }
+
+  usRows.forEach(r => {
+    const link = US_LINKS[r.sym];
+    if (!link || r.pct === null) return;
+    const p = r.pct;
+    // 只在漲跌明顯時才提示
+    if (Math.abs(p) < 2) return;
+    const dir = p > 0 ? "上漲" : "下跌";
+    const strength = Math.abs(p) >= 5 ? "大幅" : "";
+    hints.push({
+      sym: r.sym, name: link.name, pct: p,
+      themes: link.themes, note: link.note,
+      text: `${link.name} ${strength}${dir} ${p > 0 ? "+" : ""}${p.toFixed(2)}%`,
+    });
+    link.themes.forEach(t => {
+      if (!themeBias[t]) themeBias[t] = { score: 0, drivers: [] };
+      themeBias[t].score += p;
+      themeBias[t].drivers.push({ name: link.name, pct: p });
+    });
+  });
+
+  hints.sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct));
+  return { hints, themeBias };
+}
+
+// --- 美股連動對應表結束 ---
+
+// --- 美股連動提示面板 ---
+function USLinkagePanel({ usRows, onPickTheme }) {
+  const [open, setOpen] = useState(false);
+  if (!usRows?.length) return null;
+
+  const { hints, themeBias } = buildLinkageHints(usRows);
+  const indexes = usRows.filter(r => US_INDEXES[r.sym]);
+  const sox = usRows.find(r => r.sym === "^SOX");
+
+  // 題材依連動強度排序
+  const themes = Object.entries(themeBias)
+    .map(([t, v]) => ({ theme: t, avg: v.score / v.drivers.length, drivers: v.drivers }))
+    .filter(t => Math.abs(t.avg) >= 1.5)
+    .sort((a, b) => Math.abs(b.avg) - Math.abs(a.avg));
+
+  const col = p => p > 0 ? "#ef4444" : p < 0 ? "#22c55e" : "#999";
+  const dateStr = usRows[0]?.date || "";
+
+  return (
+    <div style={{ background: "#0d0d0d", border: "1px solid #1e1e1e", borderRadius: 10, marginBottom: 12, overflow: "hidden" }}>
+      <button onClick={() => setOpen(v => !v)}
+        style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "none", border: "none", cursor: "pointer" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: "#ccc" }}>美股連動</span>
+          {sox && sox.pct !== null && (
+            <span style={{ fontSize: 13, color: col(sox.pct) }}>
+              費半 {sox.pct > 0 ? "+" : ""}{sox.pct.toFixed(2)}%
+            </span>
+          )}
+          {themes.length > 0 && (
+            <span style={{ fontSize: 13, color: col(themes[0].avg) }}>
+              {themes[0].theme}{themes[0].avg > 0 ? "偏多" : "偏空"}
+            </span>
+          )}
+        </div>
+        <span style={{ fontSize: 12, color: "#777" }}>{open ? "收合" : "展開"}</span>
+      </button>
+
+      {open && (
+        <div style={{ padding: "0 12px 12px" }}>
+          {dateStr && <div style={{ fontSize: 12, color: "#777", marginBottom: 10 }}>美股收盤日：{dateStr}</div>}
+
+          {/* 指數 */}
+          {indexes.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 5, marginBottom: 12 }}>
+              {indexes.map(r => (
+                <div key={r.sym} style={{ background: "#0a0a0a", borderRadius: 6, padding: "7px 4px", textAlign: "center" }}>
+                  <div style={{ fontSize: 11, color: "#888" }}>{US_INDEXES[r.sym].name}</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: col(r.pct) }}>
+                    {r.pct !== null ? `${r.pct > 0 ? "+" : ""}${r.pct.toFixed(2)}%` : "—"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 題材連動推論 */}
+          {themes.length > 0 ? (
+            <>
+              <div style={{ fontSize: 13, color: "#bbb", marginBottom: 7 }}>可能受影響的台股題材</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+                {themes.slice(0, 5).map(t => (
+                  <button key={t.theme} onClick={() => onPickTheme?.(t.theme)}
+                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+                      background: "#0a0a0a", border: "1px solid #1a1a1a", borderRadius: 8, padding: "8px 10px", cursor: "pointer", textAlign: "left" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14, color: "#ddd", marginBottom: 2 }}>
+                        {t.theme}
+                        <span style={{ color: col(t.avg), marginLeft: 6, fontSize: 13 }}>
+                          {t.avg > 0 ? "偏多" : "偏空"}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12, color: "#999", lineHeight: 1.5 }}>
+                        {t.drivers.map(d => `${d.name} ${d.pct > 0 ? "+" : ""}${d.pct.toFixed(1)}%`).join("、")}
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 12, color: "#f97316", whiteSpace: "nowrap" }}>篩選</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: 13, color: "#999", marginBottom: 12, lineHeight: 1.7 }}>
+              美股個股漲跌幅都在 2% 以內，今日無明顯連動訊號。
+            </div>
+          )}
+
+          {/* 個股明細 */}
+          {hints.length > 0 && (
+            <>
+              <div style={{ fontSize: 13, color: "#bbb", marginBottom: 7 }}>美股主要變動</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                {hints.slice(0, 6).map(h => (
+                  <div key={h.sym} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13 }}>
+                    <span style={{ minWidth: 58, color: col(h.pct), fontWeight: 600 }}>
+                      {h.pct > 0 ? "+" : ""}{h.pct.toFixed(2)}%
+                    </span>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ color: "#ddd" }}>{h.name}</span>
+                      <span style={{ color: "#888", fontSize: 12 }}>（{h.sym}）</span>
+                      <div style={{ fontSize: 12, color: "#999", lineHeight: 1.5 }}>{h.note}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          <div style={{ fontSize: 11, color: "#777", marginTop: 10, lineHeight: 1.6 }}>
+            連動僅為產業關聯推論，台股實際走勢仍受本地籌碼與消息面影響。
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // --- 由診斷結果解析出正確的股票代號 ---
 function resolveStock(result, stocks) {
   const q = (result.query || "").trim();
@@ -1623,7 +1817,7 @@ function TabRanking({ stocks, watchlist, scanCount, lastScan, scan, scanning }) 
 // ====================================
 
 function TabScan({ mode, watchlist, scanState }) {
-  const { stocks, scanning: loading, scanError: progress, lastScan, scan, scanCount, valuation } = scanState;
+  const { stocks, scanning: loading, scanError: progress, lastScan, scan, scanCount, valuation, usRows } = scanState;
   const [selected, setSelected] = useState(null);
   const [search, setSearch] = useState("");
   const [limit, setLimit] = useState(50);
@@ -1808,6 +2002,13 @@ function TabScan({ mode, watchlist, scanState }) {
           {loading ? "掃描中…" : stocks.length > 0 ? "重新掃描" : "開始掃描"}
         </button>
       </div>
+
+      {/* 美股連動 */}
+      <USLinkagePanel usRows={usRows} onPickTheme={(t) => {
+        setThemes([t]);
+        setShowFilters(true);
+        setLimit(50);
+      }} />
 
       {/* Search + Filters */}
       {stocks.length > 0 && (
@@ -2119,6 +2320,12 @@ export default function App() {
     catch { return null; }
   });
 
+  const [usRows, setUsRows] = useState(null);
+
+  const fetchUS = async () => {
+    try { setUsRows(await fetchUSMarket()); } catch {}
+  };
+
   const fetchIndex = async () => {
     try {
       const idx = await fetchTaiex();
@@ -2223,9 +2430,10 @@ export default function App() {
     const stale = !isFinite(ts) || (Date.now() - ts) > 30 * 60 * 1000;
     if (stocks.length === 0 || stale) scan();
     if (!index || stale) fetchIndex();
+    fetchUS();
   }, []);
 
-  const scanState = { stocks, scanning, scanError, lastScan, scan, scanCount, valuation };
+  const scanState = { stocks, scanning, scanError, lastScan, scan, scanCount, valuation, usRows };
   const buyCount = stocks.filter(s => s.verdict === "買進" || s.verdict === "強力買進").length;
   const sellCount = stocks.filter(s => s.verdict === "賣出" || s.verdict === "強力賣出").length;
 
