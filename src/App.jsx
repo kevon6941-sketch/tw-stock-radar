@@ -337,6 +337,111 @@ function KLineChart({ data, height = 160 }) {
   );
 }
 
+// --- 題材概念股分類（依實際產業歸屬手動整理）---
+const THEMES = {
+  "AI伺服器": ["2382","3231","6669","2356","2376","2317","3017","3653","6215","2408","3005","6230","8112","2377","4915","3661","5388","6669","2345","3702"],
+  "半導體": ["2330","2303","2454","3711","6770","2408","5347","3105","8069","3035","3443","6533","4966","3529","6789","3034","2379","3227","8016","6239","2449","6488","3260","5269","3532"],
+  "AI晶片/IP": ["3661","6533","4966","3529","5274","6643","3035","8299","6531","3443"],
+  "電動車": ["2207","1319","1536","2231","2371","6213","2313","3563","1609","2062","6605","4552","1590"],
+  "綠能/儲能": ["6806","6443","3576","1519","6282","4739","2308","1513","6438","3266","1504","6244"],
+  "生技醫療": ["4174","6446","1795","6547","4147","1789","4154","6491","3705","6535","4737","1762","4142","6469","1723"],
+  "金融保險": ["2881","2882","2883","2884","2885","2886","2887","2888","2890","2891","2892","5880","2801","2809","2812","2820","2834","2845","2849","2855","2867","2880","2889"],
+  "航運": ["2603","2609","2615","2606","2607","2608","2610","2612","2613","2617","2618","5608","2637","2642","5607"],
+  "傳產原物料": ["1301","1303","1326","1101","1102","2002","2006","2014","2015","2023","2027","2031","1304","1305","1308","1309","1310","1312","1313","1314"],
+  "被動元件": ["2327","2492","2375","6153","2456","3044","5285","6285","2308"],
+  "網通/光通訊": ["2345","4977","3450","6143","2419","3062","4979","6462","2314","3491","6187","3234"],
+  "面板/光電": ["2409","3481","6116","2393","3019","3031","6176","8039","3714","2426","6120"],
+  "重電/電力": ["1503","1504","1513","1514","1519","1533","1540","1560","1584","6412","2371"],
+  "食品內需": ["1216","1210","1201","1229","1231","1233","1234","2912","2903","2915","5903","2923","1218","1227"],
+  "營建資產": ["2501","2504","2505","2506","2509","2511","2515","2520","2534","2542","2545","2547","5515","5522","5534"],
+  "觀光餐飲": ["2701","2702","2704","2705","2707","2712","2727","2729","2731","2739","5706","1259","2748"],
+};
+
+function getThemes(code) {
+  const out = [];
+  for (const [name, list] of Object.entries(THEMES)) {
+    if (list.includes(code)) out.push(name);
+  }
+  return out;
+}
+
+const THEME_LIST = ["全部", ...Object.keys(THEMES)];
+
+// --- 價格等級 ---
+function getPriceTier(price) {
+  const p = parseFloat(price);
+  if (p >= 500) return "高價股";
+  if (p >= 100) return "中價股";
+  if (p >= 50) return "低價股";
+  return "銅板股";
+}
+const PRICE_TIERS = [
+  { key: "all", label: "不限" },
+  { key: "高價股", label: "高價 ≥500" },
+  { key: "中價股", label: "中價 100-500" },
+  { key: "低價股", label: "低價 50-100" },
+  { key: "銅板股", label: "銅板 <50" },
+];
+
+// --- 成交量等級（張）---
+function getVolumeTier(volume) {
+  const lots = (volume || 0) / 1000;
+  if (lots >= 20000) return "爆量";
+  if (lots >= 5000) return "大量";
+  if (lots >= 1000) return "中量";
+  return "小量";
+}
+const VOLUME_TIERS = [
+  { key: "all", label: "不限" },
+  { key: "爆量", label: "爆量 ≥2萬張" },
+  { key: "大量", label: "大量 ≥5千張" },
+  { key: "中量", label: "中量 ≥1千張" },
+  { key: "小量", label: "小量 <1千張" },
+];
+
+// --- 漲跌幅區間 ---
+function getChangeTier(changeStr) {
+  const p = parseFloat(changeStr);
+  if (!isFinite(p)) return "平盤";
+  if (p >= 9.5) return "漲停";
+  if (p >= 5) return "大漲";
+  if (p >= 1) return "上漲";
+  if (p > -1) return "平盤";
+  if (p > -5) return "下跌";
+  if (p > -9.5) return "大跌";
+  return "跌停";
+}
+const CHANGE_TIERS = [
+  { key: "all", label: "不限" },
+  { key: "漲停", label: "漲停" },
+  { key: "大漲", label: "大漲 ≥5%" },
+  { key: "上漲", label: "上漲 1-5%" },
+  { key: "平盤", label: "平盤 ±1%" },
+  { key: "下跌", label: "下跌 1-5%" },
+  { key: "大跌", label: "大跌 ≥5%" },
+  { key: "跌停", label: "跌停" },
+];
+
+// --- 篩選列元件 ---
+function FilterRow({ label, options, value, onChange, last }) {
+  return (
+    <div style={{ marginBottom: last ? 0 : 12 }}>
+      <div style={{ fontSize: 14, color: "#bbb", marginBottom: 6 }}>{label}</div>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+        {options.map(o => (
+          <button key={String(o.key)} onClick={() => onChange(o.key)}
+            style={{ padding: "4px 10px", fontSize: 13, borderRadius: 8, cursor: "pointer",
+              border: value === o.key ? "1px solid #f97316" : "1px solid #222",
+              background: value === o.key ? "#1a1510" : "#111",
+              color: value === o.key ? "#f97316" : "#999" }}>
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // --- 用證交所真實數據計算買賣訊號（不需 AI）---
 function calcVerdict(r) {
   let score = 0;
@@ -1114,8 +1219,13 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
   const [search, setSearch] = useState("");
   const [limit, setLimit] = useState(50);
   const [sector, setSector] = useState("全部");
+  const [theme, setTheme] = useState("全部");
+  const [priceTier, setPriceTier] = useState("all");
+  const [volTier, setVolTier] = useState("all");
+  const [chgTier, setChgTier] = useState("all");
   const [maxPE, setMaxPE] = useState(0);
   const [minDY, setMinDY] = useState(0);
+  const [maxPB, setMaxPB] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
   const [history, setHistory] = useState({});
   const [loadingHist, setLoadingHist] = useState(null);
@@ -1138,6 +1248,10 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
     if (mode === "buy" && !(s.verdict === "買進" || s.verdict === "強力買進")) return false;
     if (mode === "sell" && !(s.verdict === "賣出" || s.verdict === "強力賣出")) return false;
     if (sector !== "全部" && getSector(s.id) !== sector) return false;
+    if (theme !== "全部" && !getThemes(s.id).includes(theme)) return false;
+    if (priceTier !== "all" && getPriceTier(s.price) !== priceTier) return false;
+    if (volTier !== "all" && getVolumeTier(s.volume) !== volTier) return false;
+    if (chgTier !== "all" && getChangeTier(s.change) !== chgTier) return false;
     if (search) {
       const q = search.trim();
       if (!s.name?.includes(q) && !s.id?.includes(q)) return false;
@@ -1145,6 +1259,7 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
     const v = valuation?.[s.id];
     if (maxPE > 0 && (!v?.pe || v.pe > maxPE || v.pe <= 0)) return false;
     if (minDY > 0 && (!v?.dy || v.dy < minDY)) return false;
+    if (maxPB > 0 && (!v?.pb || v.pb > maxPB || v.pb <= 0)) return false;
     return true;
   }).sort((a, b) => {
     const as = a.score ?? 0, bs = b.score ?? 0;
@@ -1152,7 +1267,16 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
   });
 
   const filtered = matched.slice(0, limit);
-  const activeFilters = (sector !== "全部" ? 1 : 0) + (maxPE > 0 ? 1 : 0) + (minDY > 0 ? 1 : 0);
+  const activeFilters =
+    (sector !== "全部" ? 1 : 0) + (theme !== "全部" ? 1 : 0) +
+    (priceTier !== "all" ? 1 : 0) + (volTier !== "all" ? 1 : 0) + (chgTier !== "all" ? 1 : 0) +
+    (maxPE > 0 ? 1 : 0) + (minDY > 0 ? 1 : 0) + (maxPB > 0 ? 1 : 0);
+
+  const clearAll = () => {
+    setSector("全部"); setTheme("全部"); setPriceTier("all");
+    setVolTier("all"); setChgTier("all");
+    setMaxPE(0); setMinDY(0); setMaxPB(0); setLimit(50);
+  };
 
   const buyCount = stocks.filter(s => s.verdict === "買進" || s.verdict === "強力買進").length;
   const sellCount = stocks.filter(s => s.verdict === "賣出" || s.verdict === "強力賣出").length;
@@ -1193,46 +1317,38 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
 
           {showFilters && (
             <div style={{ background: "#0d0d0d", border: "1px solid #1e1e1e", borderRadius: 10, padding: 12, marginBottom: 10 }}>
-              {/* 產業 */}
-              <div style={{ fontSize: 14, color: "#bbb", marginBottom: 6 }}>產業分類</div>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 12 }}>
-                {SECTOR_LIST.map(s => (
-                  <button key={s} onClick={() => { setSector(s); setLimit(50); }}
-                    style={{ padding: "4px 10px", fontSize: 13, borderRadius: 8, cursor: "pointer",
-                      border: sector === s ? "1px solid #f97316" : "1px solid #222",
-                      background: sector === s ? "#1a1510" : "#111",
-                      color: sector === s ? "#f97316" : "#999" }}>{s}</button>
-                ))}
-              </div>
 
-              {/* 本益比 */}
-              <div style={{ fontSize: 14, color: "#bbb", marginBottom: 6 }}>本益比上限（低＝便宜）</div>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 12 }}>
-                {[[0, "不限"], [10, "≤10"], [15, "≤15"], [20, "≤20"], [30, "≤30"]].map(([v, l]) => (
-                  <button key={v} onClick={() => { setMaxPE(v); setLimit(50); }}
-                    style={{ padding: "4px 12px", fontSize: 13, borderRadius: 8, cursor: "pointer",
-                      border: maxPE === v ? "1px solid #f97316" : "1px solid #222",
-                      background: maxPE === v ? "#1a1510" : "#111",
-                      color: maxPE === v ? "#f97316" : "#999" }}>{l}</button>
-                ))}
-              </div>
+              <FilterRow label="題材概念股" options={THEME_LIST.map(t => ({ key: t, label: t }))}
+                value={theme} onChange={v => { setTheme(v); setLimit(50); }} />
 
-              {/* 殖利率 */}
-              <div style={{ fontSize: 14, color: "#bbb", marginBottom: 6 }}>殖利率下限（高＝配息好）</div>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {[[0, "不限"], [3, "≥3%"], [4, "≥4%"], [5, "≥5%"], [6, "≥6%"]].map(([v, l]) => (
-                  <button key={v} onClick={() => { setMinDY(v); setLimit(50); }}
-                    style={{ padding: "4px 12px", fontSize: 13, borderRadius: 8, cursor: "pointer",
-                      border: minDY === v ? "1px solid #f97316" : "1px solid #222",
-                      background: minDY === v ? "#1a1510" : "#111",
-                      color: minDY === v ? "#f97316" : "#999" }}>{l}</button>
-                ))}
-              </div>
+              <FilterRow label="產業分類" options={SECTOR_LIST.map(t => ({ key: t, label: t }))}
+                value={sector} onChange={v => { setSector(v); setLimit(50); }} />
+
+              <FilterRow label="股價區間" options={PRICE_TIERS}
+                value={priceTier} onChange={v => { setPriceTier(v); setLimit(50); }} />
+
+              <FilterRow label="成交量等級" options={VOLUME_TIERS}
+                value={volTier} onChange={v => { setVolTier(v); setLimit(50); }} />
+
+              <FilterRow label="漲跌幅區間" options={CHANGE_TIERS}
+                value={chgTier} onChange={v => { setChgTier(v); setLimit(50); }} />
+
+              <FilterRow label="本益比上限（低＝便宜）"
+                options={[{key:0,label:"不限"},{key:10,label:"≤10"},{key:15,label:"≤15"},{key:20,label:"≤20"},{key:30,label:"≤30"}]}
+                value={maxPE} onChange={v => { setMaxPE(v); setLimit(50); }} />
+
+              <FilterRow label="殖利率下限（高＝配息好）"
+                options={[{key:0,label:"不限"},{key:3,label:"≥3%"},{key:4,label:"≥4%"},{key:5,label:"≥5%"},{key:6,label:"≥6%"}]}
+                value={minDY} onChange={v => { setMinDY(v); setLimit(50); }} />
+
+              <FilterRow label="股價淨值比上限（低＝可能被低估）"
+                options={[{key:0,label:"不限"},{key:0.8,label:"≤0.8"},{key:1,label:"≤1.0"},{key:1.5,label:"≤1.5"},{key:2,label:"≤2.0"}]}
+                value={maxPB} onChange={v => { setMaxPB(v); setLimit(50); }} last />
 
               {activeFilters > 0 && (
-                <button onClick={() => { setSector("全部"); setMaxPE(0); setMinDY(0); setLimit(50); }}
-                  style={{ width: "100%", marginTop: 12, padding: "8px 0", borderRadius: 8, border: "1px solid #333", background: "#141414", color: "#ef4444", fontSize: 14, cursor: "pointer" }}>
-                  清除所有篩選
+                <button onClick={clearAll}
+                  style={{ width: "100%", marginTop: 12, padding: "9px 0", borderRadius: 8, border: "1px solid #333", background: "#141414", color: "#ef4444", fontSize: 14, cursor: "pointer" }}>
+                  清除所有篩選（{activeFilters}）
                 </button>
               )}
             </div>
@@ -1302,6 +1418,13 @@ function TabScan({ mode, watchlist, apiKey, scanState }) {
                     <div style={{ fontSize: 15, color: "#ccc", lineHeight: 1.8, marginBottom: 8 }}>
                       {stock.reason}
                     </div>
+                    {getThemes(stock.id).length > 0 && (
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
+                        {getThemes(stock.id).map(t => (
+                          <span key={t} style={{ padding: "3px 9px", borderRadius: 8, fontSize: 12, background: "#1a1510", color: "#f59e0b", border: "1px solid #f5970b33" }}>{t}</span>
+                        ))}
+                      </div>
+                    )}
                     {stock.open && (
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, marginBottom: 10 }}>
                         {[["開", stock.open], ["高", stock.high], ["低", stock.low], ["量", stock.volume ? Math.round(stock.volume / 1000) + "張" : "—"]].map(([l, v]) => (
