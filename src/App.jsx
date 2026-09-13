@@ -715,6 +715,22 @@ const CORS_PROXIES = [
   (u) => `https://cors-anywhere.herokuapp.com/${u}`,
 ];
 
+// 記住上次成功的代理，大幅加速後續請求
+let WORKING_PROXY = null;
+try { WORKING_PROXY = parseInt(localStorage.getItem("tw-stock-proxy")); } catch {}
+if (!isFinite(WORKING_PROXY)) WORKING_PROXY = null;
+
+function orderedProxies() {
+  if (WORKING_PROXY === null || !CORS_PROXIES[WORKING_PROXY]) return CORS_PROXIES.map((f, i) => [i, f]);
+  const rest = CORS_PROXIES.map((f, i) => [i, f]).filter(([i]) => i !== WORKING_PROXY);
+  return [[WORKING_PROXY, CORS_PROXIES[WORKING_PROXY]], ...rest];
+}
+
+function markProxy(i) {
+  WORKING_PROXY = i;
+  try { localStorage.setItem("tw-stock-proxy", String(i)); } catch {}
+}
+
 async function fetchTWSE(url, localFile) {
   const errs = [];
 
@@ -730,8 +746,8 @@ async function fetchTWSE(url, localFile) {
     } catch (e) { errs.push("快取:" + e.message); }
   }
 
-  // 2. 退而求其次，試各種 CORS 代理抓即時資料
-  for (const wrap of CORS_PROXIES) {
+  // 2. 退而求其次，試各種 CORS 代理抓即時資料（優先用上次成功的）
+  for (const [idx, wrap] of orderedProxies()) {
     try {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 10000);
@@ -742,10 +758,11 @@ async function fetchTWSE(url, localFile) {
       try {
         const maybe = JSON.parse(txt);
         if (maybe && typeof maybe.contents === "string") txt = maybe.contents;
-        else if (Array.isArray(maybe) && maybe.length) return maybe;
+        else if (Array.isArray(maybe) && maybe.length) { markProxy(idx); return maybe; }
       } catch {}
       const json = JSON.parse(txt);
       if (!Array.isArray(json) || json.length === 0) throw new Error("空資料");
+      markProxy(idx);
       return json;
     } catch (e) {
       errs.push(e.name === "AbortError" ? "逾時" : e.message);
@@ -815,10 +832,11 @@ async function fetchValuation() {
   return map;
 }
 
-// 個股近期日線（用於 K 線圖與技術指標）
-async function fetchStockHistory(code) {
+
+// 個股近期日線（用於走勢圖與技術指標）
+async function fetchStockHistory(code, opts = {}) {
+  const { timeout = 7000, signal: outerSignal, quick = false } = opts;
   const now = new Date();
-  // 試本月，資料不足再補上個月
   const months = [
     new Date(now.getFullYear(), now.getMonth(), 1),
     new Date(now.getFullYear(), now.getMonth() - 1, 1),
@@ -827,17 +845,24 @@ async function fetchStockHistory(code) {
   const fetchMonth = async (dt) => {
     const ym = `${dt.getFullYear()}${String(dt.getMonth() + 1).padStart(2, "0")}01`;
     const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${ym}&stockNo=${code}`;
-    for (const wrap of CORS_PROXIES) {
+    // quick 模式只試已知可用的代理 + 一個備援，避免逐一等到逾時
+    const list = quick ? orderedProxies().slice(0, 2) : orderedProxies();
+    for (const [idx, wrap] of list) {
+      if (outerSignal?.aborted) throw new Error("已取消");
       try {
         const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 9000);
+        const timer = setTimeout(() => ctrl.abort(), timeout);
+        const onAbort = () => ctrl.abort();
+        outerSignal?.addEventListener("abort", onAbort);
         const r = await fetch(wrap(url), { signal: ctrl.signal });
         clearTimeout(timer);
+        outerSignal?.removeEventListener("abort", onAbort);
         if (!r.ok) continue;
         let txt = await r.text();
         let j = JSON.parse(txt);
         if (j && typeof j.contents === "string") j = JSON.parse(j.contents);
         if (!j?.data?.length) continue;
+        markProxy(idx);
         return j.data.map(row => ({
           date: row[0],
           open: parseFloat(String(row[3]).replace(/,/g, "")),
@@ -846,7 +871,9 @@ async function fetchStockHistory(code) {
           close: parseFloat(String(row[6]).replace(/,/g, "")),
           volume: parseInt(String(row[1]).replace(/,/g, "")) || 0,
         })).filter(x => isFinite(x.close) && x.close > 0);
-      } catch {}
+      } catch (e) {
+        if (outerSignal?.aborted) throw new Error("已取消");
+      }
     }
     return [];
   };
@@ -2602,7 +2629,9 @@ function TabScan({ mode, watchlist, scanState }) {
   const [loadingHist, setLoadingHist] = useState(null);
   const [deepResults, setDeepResults] = useState({});
   const [deepRunning, setDeepRunning] = useState(false);
-  const [deepProgress, setDeepProgress] = useState({ done: 0, total: 0 });
+  const [deepProgress, setDeepProgress] = useState({ done: 0, total: 0, ok: 0, fail: 0 });
+  const [deepCount, setDeepCount] = useState(15);
+  const [abortCtrl, setAbortCtrl] = useState(null);
   const [deepError, setDeepError] = useState("");
   const [useDeep, setUseDeep] = useState(false);
 
@@ -2668,53 +2697,58 @@ function TabScan({ mode, watchlist, scanState }) {
   });
 
   const runDeepAnalysis = async () => {
-    setDeepRunning(true);
-    setDeepError("");
-
-    // 直接分析目前清單上的股票（最多 40 檔）
-    const candidates = matchedRaw.slice(0, 40);
-
+    const candidates = matchedRaw.slice(0, deepCount);
     if (candidates.length === 0) {
       setDeepError("清單上沒有股票可分析");
-      setDeepRunning(false);
       return;
     }
 
-    setDeepProgress({ done: 0, total: candidates.length });
-    const results = {};
-    let failed = 0;
+    const ctrl = new AbortController();
+    setAbortCtrl(ctrl);
+    setDeepRunning(true);
+    setDeepError("");
+    setDeepProgress({ done: 0, total: candidates.length, ok: 0, fail: 0 });
 
-    const BATCH = 3;
-    for (let i = 0; i < candidates.length; i += BATCH) {
-      const batch = candidates.slice(i, i + BATCH);
-      await Promise.all(batch.map(async (s) => {
-        try {
-          const hist = await fetchStockHistory(s.id);
-          const a = analyzeTechnical(hist);
-          if (a) {
-            results[s.id] = a;
-            setHistory(prev => ({ ...prev, [s.id]: hist.slice(-30) }));
-          } else {
-            failed++;
-          }
-        } catch {
-          failed++;
-        }
-      }));
-      setDeepProgress({ done: Math.min(i + BATCH, candidates.length), total: candidates.length });
-      setDeepResults({ ...results });
-    }
+    const results = {};
+    let ok = 0, fail = 0;
+    const BATCH = 4;
+
+    try {
+      for (let i = 0; i < candidates.length; i += BATCH) {
+        if (ctrl.signal.aborted) break;
+        const batch = candidates.slice(i, i + BATCH);
+        await Promise.all(batch.map(async (s) => {
+          try {
+            // 第一檔用完整模式找出可用代理，之後用 quick 模式加速
+            const quick = ok > 0 || i > 0;
+            const hist = await fetchStockHistory(s.id, { signal: ctrl.signal, quick, timeout: quick ? 6000 : 9000 });
+            const a = analyzeTechnical(hist);
+            if (a) {
+              results[s.id] = a;
+              ok++;
+              setHistory(prev => ({ ...prev, [s.id]: hist.slice(-30) }));
+            } else { fail++; }
+          } catch { fail++; }
+        }));
+        setDeepProgress({ done: Math.min(i + BATCH, candidates.length), total: candidates.length, ok, fail });
+        setDeepResults({ ...results });
+      }
+    } catch {}
 
     setDeepResults(results);
     const okCount = Object.keys(results).length;
-    if (okCount === 0) {
-      setDeepError(`全部 ${candidates.length} 檔都抓不到歷史資料，可能是代理伺服器不穩，請稍後再試`);
+    if (ctrl.signal.aborted) {
+      setDeepError(okCount > 0 ? `已取消，完成 ${okCount} 檔` : "已取消");
+      if (okCount > 0) setUseDeep(true);
+    } else if (okCount === 0) {
+      setDeepError("全部抓不到歷史資料。免費代理伺服器目前不穩定，可稍後再試，或改用下方個股的「載入」逐檔查看。");
       setUseDeep(false);
     } else {
-      if (failed > 0) setDeepError(`${okCount} 檔成功、${failed} 檔失敗（歷史資料抓取不穩定）`);
+      if (fail > 0) setDeepError(`完成 ${okCount} 檔，${fail} 檔失敗`);
       setUseDeep(true);
     }
     setDeepRunning(false);
+    setAbortCtrl(null);
   };
 
   // 套用深度分析結果（若有）
@@ -2801,27 +2835,51 @@ function TabScan({ mode, watchlist, scanState }) {
                 <div style={{ fontSize: 12, color: "#999", marginTop: 2, lineHeight: 1.6 }}>
                   {useDeep
                     ? `已分析 ${Object.keys(deepResults).length} 檔：均線排列、KD、RSI、MACD、量價`
-                    : `將分析清單前 ${Math.min(matchedRaw.length, 40)} 檔，計算均線、KD、RSI、MACD`}
+                    : `計算均線排列、KD、RSI、MACD、量價關係`}
                 </div>
+                {!useDeep && !deepRunning && (
+                  <div style={{ display: "flex", gap: 4, alignItems: "center", marginTop: 6 }}>
+                    <span style={{ fontSize: 12, color: "#999" }}>分析檔數</span>
+                    {[10, 15, 25, 40].map(n => (
+                      <button key={n} onClick={() => setDeepCount(n)}
+                        style={{ padding: "2px 9px", fontSize: 12, borderRadius: 6, cursor: "pointer",
+                          border: deepCount === n ? "1px solid #22c55e" : "1px solid #222",
+                          background: deepCount === n ? "#0d1f0d" : "#111",
+                          color: deepCount === n ? "#86efac" : "#999" }}>
+                        {n}
+                      </button>
+                    ))}
+                    <span style={{ fontSize: 11, color: "#777" }}>約 {Math.ceil(deepCount / 4) * 8} 秒</span>
+                  </div>
+                )}
               </div>
-              {!deepRunning && (
-                useDeep ? (
-                  <button onClick={() => setUseDeep(false)}
-                    style={{ padding: "7px 12px", borderRadius: 8, border: "1px solid #333", background: "#141414", color: "#999", fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>
-                    回快篩
-                  </button>
-                ) : (
-                  <button onClick={runDeepAnalysis} disabled={stocks.length === 0}
-                    style={{ padding: "8px 13px", borderRadius: 8, border: "none", background: "linear-gradient(135deg, #16a34a, #22c55e)", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
-                    深度分析
-                  </button>
-                )
+              {deepRunning ? (
+                <button onClick={() => abortCtrl?.abort()}
+                  style={{ padding: "7px 12px", borderRadius: 8, border: "1px solid #dc2626", background: "#1a1010", color: "#fca5a5", fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>
+                  停止
+                </button>
+              ) : useDeep ? (
+                <button onClick={() => setUseDeep(false)}
+                  style={{ padding: "7px 12px", borderRadius: 8, border: "1px solid #333", background: "#141414", color: "#999", fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>
+                  回快篩
+                </button>
+              ) : (
+                <button onClick={runDeepAnalysis} disabled={stocks.length === 0}
+                  style={{ padding: "8px 13px", borderRadius: 8, border: "none", background: "linear-gradient(135deg, #16a34a, #22c55e)", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+                  深度分析
+                </button>
               )}
             </div>
             {deepRunning && (
               <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 13, color: "#f59e0b", marginBottom: 5 }}>
-                  抓取歷史資料計算指標中… {deepProgress.done} / {deepProgress.total}
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 5 }}>
+                  <span style={{ color: "#f59e0b" }}>
+                    分析中 {deepProgress.done} / {deepProgress.total}
+                  </span>
+                  <span style={{ color: "#999" }}>
+                    成功 <span style={{ color: "#22c55e" }}>{deepProgress.ok}</span>
+                    {deepProgress.fail > 0 && <>　失敗 <span style={{ color: "#ef4444" }}>{deepProgress.fail}</span></>}
+                  </span>
                 </div>
                 <div style={{ height: 5, background: "#1a1a1a", borderRadius: 3 }}>
                   <div style={{ height: 5, borderRadius: 3, background: "linear-gradient(90deg,#f59e0b,#22c55e)", width: `${deepProgress.total ? (deepProgress.done / deepProgress.total) * 100 : 0}%`, transition: "width 0.3s" }} />
