@@ -601,6 +601,336 @@ function LevelsPanel({ levels }) {
   );
 }
 
+// --- 綜合進場評估 ---
+function assessEntry({ hist, priceData, valuation, usRows }) {
+  if (!hist || hist.length < 20) return null;
+
+  const last = hist[hist.length - 1];
+  const close = last.close;
+  const code = priceData?.code;
+
+  const ma5 = calcMA(hist, 5), ma10 = calcMA(hist, 10), ma20 = calcMA(hist, 20);
+  const ma60 = hist.length >= 60 ? calcMA(hist, 60) : null;
+  const rsi = calcRSI(hist, 14);
+  const kd = calcKD(hist, 9);
+  const macd = calcMACD(hist);
+
+  const high20 = Math.max(...hist.slice(-20).map(d => d.high));
+  const low20 = Math.min(...hist.slice(-20).map(d => d.low));
+  const posInRange = high20 > low20 ? ((close - low20) / (high20 - low20)) * 100 : 50;
+  const bias20 = ma20 ? ((close - ma20) / ma20) * 100 : 0;
+
+  const avgVol = hist.slice(-20).reduce((s, d) => s + d.volume, 0) / 20;
+  const volRatio = avgVol > 0 ? last.volume / avgVol : 1;
+  const avgLots = avgVol / 1000;
+
+  const checks = [];
+  const push = (key, title, pass, detail, weight = 1) =>
+    checks.push({ key, title, pass, detail, weight });
+
+  // === 趨勢面 ===
+  push("trend_ma20", "中期趨勢向上",
+    ma20 ? close > ma20 : null,
+    ma20 ? `股價 ${close.toFixed(2)}，月線 ${ma20.toFixed(2)}（${bias20 >= 0 ? "高出" : "低於"} ${Math.abs(bias20).toFixed(1)}%）` : "資料不足",
+    2);
+
+  push("trend_align", "均線多頭排列",
+    (ma5 && ma10 && ma20) ? (ma5 > ma10 && ma10 > ma20) : null,
+    (ma5 && ma10 && ma20)
+      ? `5日 ${ma5.toFixed(2)}、10日 ${ma10.toFixed(2)}、20日 ${ma20.toFixed(2)}`
+      : "資料不足",
+    1.5);
+
+  if (ma60) {
+    push("trend_ma60", "站上季線（長期趨勢）",
+      close > ma60,
+      `季線 ${ma60.toFixed(2)}`,
+      1);
+  }
+
+  // === 位階面（避免追高）===
+  push("not_extended", "位階不過高",
+    bias20 <= 12,
+    bias20 > 12
+      ? `已高出月線 ${bias20.toFixed(1)}%，離均線太遠，回檔機率高`
+      : `乖離 ${bias20.toFixed(1)}%，位階合理`,
+    2);
+
+  push("range_pos", "不在近期高點附近",
+    posInRange <= 85,
+    `現價位於近 20 日區間的 ${posInRange.toFixed(0)}%（${low20.toFixed(2)} ~ ${high20.toFixed(2)}）`,
+    1.5);
+
+  push("rsi_ok", "RSI 未超買",
+    rsi !== null ? rsi < 72 : null,
+    rsi !== null ? `RSI ${rsi.toFixed(0)}（70 以上為超買區）` : "資料不足",
+    1);
+
+  push("kd_ok", "KD 未在高檔鈍化",
+    kd ? kd.k < 85 : null,
+    kd ? `K ${kd.k.toFixed(0)}、D ${kd.d.toFixed(0)}` : "資料不足",
+    1);
+
+  // === 動能面 ===
+  push("macd_ok", "MACD 動能偏多",
+    macd ? macd.osc > 0 : null,
+    macd ? `柱狀體 ${macd.osc > 0 ? "+" : ""}${macd.osc.toFixed(2)}、DIF ${macd.dif.toFixed(2)}` : "資料不足",
+    1);
+
+  push("vol_healthy", "量能正常（非爆量或急縮）",
+    volRatio >= 0.5 && volRatio <= 2.5,
+    `當日量 ${Math.round(last.volume / 1000).toLocaleString()} 張，為 20 日均量的 ${volRatio.toFixed(1)} 倍`,
+    1);
+
+  // === 流動性 ===
+  push("liquidity", "流動性足夠",
+    avgLots >= 500,
+    `20 日均量 ${Math.round(avgLots).toLocaleString()} 張${avgLots < 500 ? "（偏低，進出可能不易）" : ""}`,
+    1.5);
+
+  // === 估值面 ===
+  const val = valuation?.[code];
+  if (val?.pe && val.pe > 0) {
+    push("pe", "本益比合理",
+      val.pe <= 25,
+      `本益比 ${val.pe.toFixed(1)} 倍${val.pe > 25 ? "（偏高，對獲利成長要求高）" : ""}`,
+      1);
+  }
+  if (val?.dy && val.dy > 0) {
+    push("dy", "有股息保護",
+      val.dy >= 3,
+      `殖利率 ${val.dy.toFixed(2)}%`,
+      0.5);
+  }
+
+  // === 外部連動 ===
+  if (usRows?.length && code) {
+    const themes = getThemes(code);
+    if (themes.length) {
+      const { themeBias } = buildLinkageHints(usRows);
+      const related = themes.filter(t => themeBias[t]);
+      if (related.length) {
+        const avg = related.reduce((s, t) => s + themeBias[t].score / themeBias[t].drivers.length, 0) / related.length;
+        push("us_link", "美股連動偏正面",
+          avg > 0,
+          `${related.join("、")}　相關美股平均 ${avg > 0 ? "+" : ""}${avg.toFixed(1)}%`,
+          1);
+      }
+    }
+  }
+
+  // 計分
+  const known = checks.filter(c => c.pass !== null);
+  const totalW = known.reduce((s, c) => s + c.weight, 0);
+  const gotW = known.filter(c => c.pass).reduce((s, c) => s + c.weight, 0);
+  let pct = totalW > 0 ? (gotW / totalW) * 100 : 0;
+
+  const failed = known.filter(c => !c.pass);
+
+  // 否決條件：趨勢或流動性不合格，不管其他項目多好都不適合進場
+  const vetoes = [];
+  const trendOK = checks.find(c => c.key === "trend_ma20")?.pass;
+  const alignOK = checks.find(c => c.key === "trend_align")?.pass;
+  const liqOK = checks.find(c => c.key === "liquidity")?.pass;
+  const extOK = checks.find(c => c.key === "not_extended")?.pass;
+
+  if (trendOK === false) vetoes.push("股價在月線之下，中期趨勢向下。逆勢進場勝率低");
+  if (trendOK === false && alignOK === false) vetoes.push("均線呈空頭排列，下降趨勢明確");
+  if (liqOK === false) vetoes.push("成交量太小，買賣不易成交且容易被大單影響");
+  if (extOK === false && bias20 > 20) vetoes.push("嚴重偏離均線，隨時可能大幅回檔");
+
+  // 結論
+  let level, summary, action;
+  if (vetoes.length > 0) {
+    level = "bad";
+    summary = "不建議進場";
+    action = vetoes[0] + "。" + (vetoes.length > 1 ? `另有 ${vetoes.length - 1} 項問題。` : "") +
+      "若已持有，注意停損位是否被跌破。";
+    pct = Math.min(pct, 35);   // 有否決項時分數上限
+  } else if (pct >= 80) {
+    level = "good";
+    summary = "多數條件符合";
+    action = "技術面條件不錯，但仍須設好停損再進場。建議分批買進，不要一次全押。";
+  } else if (pct >= 62) {
+    level = "fair";
+    summary = "部分條件符合";
+    action = "有幾項不理想，可以小量試單或再觀察。若要進場，部位建議比平常小。";
+  } else {
+    level = "weak";
+    summary = "條件不足";
+    action = "訊號不夠明確，等趨勢更清楚再進場比較安全。";
+  }
+
+  // 關鍵價位
+  const levels = calcLevels(hist, { ma5, ma10, ma20 });
+  const stopRef = levels?.nearestSupport?.price ? levels.nearestSupport.price * 0.99 : close * 0.93;
+  const targetRef = levels?.nearestResistance?.price || null;
+
+  return {
+    pct, level, summary, action, checks, failed, vetoes,
+    passCount: known.filter(c => c.pass).length,
+    totalCount: known.length,
+    levels, stopRef, targetRef,
+    indicators: { close, ma5, ma10, ma20, ma60, rsi, kd, macd, bias20, posInRange, volRatio, avgLots },
+  };
+}
+
+// --- 綜合評估顯示 ---
+function EntryAssessment({ assess, code, name }) {
+  const [showAll, setShowAll] = useState(false);
+  if (!assess) return null;
+
+  const colors = {
+    good: { bg: "#0d1f0d", border: "#22c55e", text: "#86efac", bar: "#22c55e" },
+    fair: { bg: "#1a1510", border: "#f59e0b", text: "#fcd34d", bar: "#f59e0b" },
+    weak: { bg: "#1a1510", border: "#f59e0b66", text: "#fcd34d", bar: "#f59e0b" },
+    bad:  { bg: "#2a1515", border: "#dc2626", text: "#fca5a5", bar: "#ef4444" },
+  }[assess.level];
+
+  const groups = [
+    { title: "趨勢", keys: ["trend_ma20", "trend_align", "trend_ma60"] },
+    { title: "位階", keys: ["not_extended", "range_pos", "rsi_ok", "kd_ok"] },
+    { title: "動能與量能", keys: ["macd_ok", "vol_healthy", "liquidity"] },
+    { title: "估值與外部", keys: ["pe", "dy", "us_link"] },
+  ];
+
+  return (
+    <div style={{ background: "#0d0d0d", borderRadius: 10, padding: 14, marginBottom: 10 }}>
+      <div style={{ fontSize: 16, fontWeight: 700, color: "#e5e5e5", marginBottom: 10 }}>
+        進場條件評估
+      </div>
+
+      {/* 總結 */}
+      <div style={{ background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 9, padding: 12, marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
+          <span style={{ fontSize: 17, fontWeight: 700, color: colors.text }}>{assess.summary}</span>
+          <span style={{ fontSize: 15, color: "#ccc" }}>
+            <span style={{ fontSize: 22, fontWeight: 800, color: colors.text }}>{assess.passCount}</span>
+            <span style={{ color: "#999" }}> / {assess.totalCount} 項</span>
+          </span>
+        </div>
+        <div style={{ height: 6, background: "#1a1a1a", borderRadius: 3, marginBottom: 10 }}>
+          <div style={{ height: 6, width: `${assess.pct}%`, background: colors.bar, borderRadius: 3, transition: "width 0.4s" }} />
+        </div>
+        <div style={{ fontSize: 14, color: "#ddd", lineHeight: 1.8 }}>{assess.action}</div>
+        {assess.vetoes?.length > 1 && (
+          <div style={{ marginTop: 9, paddingTop: 9, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+            {assess.vetoes.slice(1).map((v, i) => (
+              <div key={i} style={{ fontSize: 13, color: "#fca5a5", lineHeight: 1.7 }}>• {v}</div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 未通過項目優先顯示 */}
+      {assess.failed.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#fca5a5", marginBottom: 7 }}>
+            需要注意的 {assess.failed.length} 項
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+            {assess.failed.map(c => (
+              <div key={c.key} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                <span style={{ minWidth: 17, height: 17, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center",
+                  border: "1px solid #ef444455", color: "#ef4444", fontSize: 11, fontWeight: 700, flexShrink: 0, marginTop: 2 }}>✗</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, color: "#ddd" }}>{c.title}</div>
+                  <div style={{ fontSize: 12, color: "#999", lineHeight: 1.6, marginTop: 1 }}>{c.detail}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 全部項目 */}
+      <button onClick={() => setShowAll(v => !v)}
+        style={{ width: "100%", padding: "8px 0", borderRadius: 8, border: "1px solid #2a2a2a",
+          background: "#111", color: "#999", fontSize: 13, cursor: "pointer", marginBottom: showAll ? 10 : 12 }}>
+        {showAll ? "收合完整檢查" : `看完整 ${assess.totalCount} 項檢查`}
+      </button>
+
+      {showAll && (
+        <div style={{ marginBottom: 12 }}>
+          {groups.map(g => {
+            const items = assess.checks.filter(c => g.keys.includes(c.key) && c.pass !== null);
+            if (items.length === 0) return null;
+            return (
+              <div key={g.title} style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 13, color: "#888", marginBottom: 6 }}>{g.title}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {items.map(c => (
+                    <div key={c.key} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                      <span style={{ minWidth: 17, height: 17, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center",
+                        border: `1px solid ${c.pass ? "#22c55e55" : "#ef444455"}`, color: c.pass ? "#22c55e" : "#ef4444",
+                        fontSize: 11, fontWeight: 700, flexShrink: 0, marginTop: 2 }}>
+                        {c.pass ? "✓" : "✗"}
+                      </span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 14, color: c.pass ? "#ccc" : "#ddd" }}>{c.title}</div>
+                        <div style={{ fontSize: 12, color: "#999", lineHeight: 1.6, marginTop: 1 }}>{c.detail}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 關鍵價位 */}
+      <div style={{ background: "#0a0a0a", borderRadius: 8, padding: 11 }}>
+        <div style={{ fontSize: 13, color: "#bbb", marginBottom: 8 }}>如果決定進場，關鍵價位</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+            <span style={{ color: "#999" }}>現價</span>
+            <span style={{ color: "#e5e5e5", fontWeight: 700 }}>{assess.indicators.close.toFixed(2)}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+            <span style={{ color: "#999" }}>停損參考（跌破就走）</span>
+            <span style={{ color: "#22c55e", fontWeight: 700 }}>
+              {assess.stopRef.toFixed(2)}
+              <span style={{ fontSize: 12, color: "#999", marginLeft: 5 }}>
+                -{(((assess.indicators.close - assess.stopRef) / assess.indicators.close) * 100).toFixed(1)}%
+              </span>
+            </span>
+          </div>
+          {assess.targetRef && (
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+              <span style={{ color: "#999" }}>上方壓力（可能停利）</span>
+              <span style={{ color: "#f97316", fontWeight: 700 }}>
+                {assess.targetRef.toFixed(2)}
+                <span style={{ fontSize: 12, color: "#999", marginLeft: 5 }}>
+                  +{(((assess.targetRef - assess.indicators.close) / assess.indicators.close) * 100).toFixed(1)}%
+                </span>
+              </span>
+            </div>
+          )}
+          {assess.indicators.ma20 && (
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+              <span style={{ color: "#999" }}>月線（趨勢分界）</span>
+              <span style={{ color: "#eab308", fontWeight: 700 }}>{assess.indicators.ma20.toFixed(2)}</span>
+            </div>
+          )}
+        </div>
+        {assess.targetRef && (
+          <div style={{ fontSize: 12, color: "#999", marginTop: 9, lineHeight: 1.6, paddingTop: 9, borderTop: "1px solid #1a1a1a" }}>
+            風險報酬比約 1:{((assess.targetRef - assess.indicators.close) / (assess.indicators.close - assess.stopRef)).toFixed(1)}
+            {((assess.targetRef - assess.indicators.close) / (assess.indicators.close - assess.stopRef)) < 1.5
+              ? "　偏低，代表賺的空間比賠的風險小，不太划算"
+              : "　尚可"}
+          </div>
+        )}
+      </div>
+
+      <div style={{ fontSize: 11, color: "#777", marginTop: 10, lineHeight: 1.7 }}>
+        本評估僅涵蓋技術面與估值，未包含法人籌碼、財報細節與消息面。資料為前一交易日收盤，僅供參考，不構成投資建議。
+      </div>
+    </div>
+  );
+}
+
 // --- 由診斷結果解析出正確的股票代號 ---
 function resolveStock(result, stocks) {
   const q = (result.query || "").trim();
@@ -2448,6 +2778,13 @@ ${ctx}
                     ) : wHistory[item.id].length > 0 ? (
                       <>
                         <StockPanel code={item.id} name={item.name} hist={wHistory[item.id]} />
+                        <EntryAssessment
+                          assess={assessEntry({
+                            hist: wHistory[item.id],
+                            priceData: { code: item.id },
+                            valuation: null, usRows: null,
+                          })}
+                          code={item.id} name={item.name} />
                         <ChartToggle data={wHistory[item.id]} />
                         {wHistory[item.id].length >= 10 && (() => {
                           const lv = calcLevels(wHistory[item.id], null);
@@ -3082,6 +3419,13 @@ function TabScan({ mode, watchlist, scanState }) {
                     {history[stock.id]?.length > 0 && (
                       <>
                         <StockPanel code={stock.id} name={stock.name} hist={history[stock.id]} />
+                        <EntryAssessment
+                          assess={assessEntry({
+                            hist: history[stock.id],
+                            priceData: { code: stock.id },
+                            valuation, usRows,
+                          })}
+                          code={stock.id} name={stock.name} />
                         <ChartToggle data={history[stock.id]} />
                       </>
                     )}
