@@ -2919,7 +2919,7 @@ ${ctx}
 // ====================================
 // TAB: 法人動向（板塊買賣超）
 // ====================================
-function TabFlows({ inst, priceMap, watchlist, loading }) {
+function TabFlows({ inst, priceMap, watchlist, loading, error }) {
   const [days, setDays] = useState(5);
   const [dir, setDir] = useState("buy");
   const [open, setOpen] = useState(null);
@@ -2953,10 +2953,11 @@ function TabFlows({ inst, priceMap, watchlist, loading }) {
     return (
       <div style={{ padding: 30, background: "#111", borderRadius: 12, border: "1px solid #1e1e1e" }}>
         <div style={{ fontSize: 16, color: "#ccc", marginBottom: 8 }}>尚無法人資料</div>
+        {error && <div style={{ fontSize: 14, color: "#ef4444", marginBottom: 8 }}>錯誤：{error}</div>}
         <div style={{ fontSize: 14, color: "#999", lineHeight: 1.8 }}>
           這份資料由 GitHub Action 每日從證交所抓取並累積。
           請到 repo 的 Actions 頁面手動執行一次「Fetch Market Data」，
-          資料產生後重新整理即可看到。
+          等 Action 完成後約 2-3 分鐘（等待自動部署），再重新整理本頁即可。
         </div>
       </div>
     );
@@ -3773,11 +3774,12 @@ export default function App() {
   const [usRows, setUsRows] = useState(null);
   const [inst, setInst] = useState(null);
   const [instLoading, setInstLoading] = useState(true);
-  const [flowPrices, setFlowPrices] = useState(null);
+  const [instError, setInstError] = useState(null);
 
   const fetchInst = async () => {
     setInstLoading(true);
-    try { setInst(await fetchInstitutional()); } catch { setInst(null); }
+    setInstError(null);
+    try { setInst(await fetchInstitutional()); } catch (e) { setInst(null); setInstError(e.message); }
     setInstLoading(false);
   };
 
@@ -3979,7 +3981,7 @@ export default function App() {
         {tab === "watchlist" && <TabWatchlist watchlist={watchlist} apiKey={apiKey} priceMap={priceMap} />}
         {tab === "buy" && <TabScan mode="buy" watchlist={watchlist} scanState={scanState} />}
         {tab === "sell" && <TabScan mode="sell" watchlist={watchlist} scanState={scanState} />}
-        {tab === "flows" && <TabFlows inst={inst} priceMap={flowPrices} watchlist={watchlist} loading={instLoading} />}
+        {tab === "flows" && <TabFlows inst={inst} priceMap={priceMap} watchlist={watchlist} loading={instLoading} error={instError} />}
         {tab === "rank" && <TabRanking stocks={stocks} watchlist={watchlist} scanCount={scanCount} lastScan={lastScan} scan={scan} scanning={scanning} />}
 
         {/* Footer */}
