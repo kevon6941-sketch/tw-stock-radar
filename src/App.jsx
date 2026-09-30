@@ -171,7 +171,7 @@ function aggregateSectorFlows(inst, priceMap, days) {
 
   const groups = {};
   const ensure = (name) => {
-    if (!groups[name]) groups[name] = { name, total: 0, today: 0, members: [], buyCount: 0 };
+    if (!groups[name]) groups[name] = { name, total: 0, foreign: 0, trust: 0, today: 0, todayForeign: 0, todayTrust: 0, members: [], buyCount: 0 };
     return groups[name];
   };
 
@@ -188,7 +188,11 @@ function aggregateSectorFlows(inst, priceMap, days) {
     for (const n of names) {
       const g = ensure(n);
       g.total += flow.total;
+      g.foreign += flow.foreign;
+      g.trust += flow.trust;
       g.today += todayFlow?.total || 0;
+      g.todayForeign += todayFlow?.foreign || 0;
+      g.todayTrust += todayFlow?.trust || 0;
       if (flow.total > 0) g.buyCount++;
       g.members.push({
         code,
@@ -2922,13 +2926,17 @@ ${ctx}
 function TabFlows({ inst, priceMap, watchlist, loading, error }) {
   const [days, setDays] = useState(5);
   const [dir, setDir] = useState("buy");
+  const [who, setWho] = useState("total"); // "total" | "foreign" | "trust"
   const [open, setOpen] = useState(null);
 
   const flows = inst ? aggregateSectorFlows(inst, priceMap, days) : [];
-  const list = (dir === "buy" ? flows.filter(f => f.total > 0)
-                              : flows.filter(f => f.total < 0).reverse()).slice(0, 12);
+  const getVal = (f) => f[who];
+  const getToday = (f) => who === "foreign" ? f.todayForeign : who === "trust" ? f.todayTrust : f.today;
+  const getMemberVal = (m) => who === "foreign" ? m.foreign : who === "trust" ? m.trust : m.flow;
+  const list = (dir === "buy" ? flows.filter(f => getVal(f) > 0)
+                              : flows.filter(f => getVal(f) < 0).reverse()).slice(0, 12);
 
-  const maxAbs = list.length ? Math.max(...list.map(f => Math.abs(f.total))) : 1;
+  const maxAbs = list.length ? Math.max(...list.map(f => Math.abs(getVal(f)))) : 1;
   const col = v => v > 0 ? "#ef4444" : v < 0 ? "#22c55e" : "#999";
   const fmtLots = v => {
     const a = Math.abs(v);
@@ -2986,7 +2994,7 @@ function TabFlows({ inst, priceMap, watchlist, loading, error }) {
       </div>
 
       {/* 當日 / 5日 / 20日 */}
-      <div style={{ display: "flex", background: "#111", borderRadius: 9, padding: 3, marginBottom: 10, border: "1px solid #1a1a1a" }}>
+      <div style={{ display: "flex", background: "#111", borderRadius: 9, padding: 3, marginBottom: 8, border: "1px solid #1a1a1a" }}>
         {[[1, "當日"], [5, "5 日"], [20, "20 日"]].map(([n, l]) => {
           const enough = (inst.dates.length || 0) >= n;
           return (
@@ -3002,8 +3010,21 @@ function TabFlows({ inst, priceMap, watchlist, loading, error }) {
         })}
       </div>
 
+      {/* 三大法人 / 外資 / 投信 */}
+      <div style={{ display: "flex", background: "#111", borderRadius: 9, padding: 3, marginBottom: 10, border: "1px solid #1a1a1a" }}>
+        {[["total", "三大法人"], ["foreign", "外資"], ["trust", "投信"]].map(([k, l]) => (
+          <button key={k} onClick={() => { setWho(k); setOpen(null); }}
+            style={{ flex: 1, padding: "8px 0", borderRadius: 7, border: "none", cursor: "pointer", fontSize: 14,
+              fontWeight: who === k ? 700 : 400,
+              background: who === k ? "#1f1f1f" : "transparent",
+              color: who === k ? "#60a5fa" : "#888" }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
       <div style={{ background: "#0d0d0d", borderLeft: "3px solid #f97316", borderRadius: 6, padding: "9px 11px", marginBottom: 12, fontSize: 13, color: "#bbb", lineHeight: 1.7 }}>
-        近 {dayCount} 個交易日法人{dir === "buy" ? "買" : "賣"}最多的板塊（累計買賣超張數，只呈現事實、不構成投資建議）
+        近 {dayCount} 個交易日{who === "foreign" ? "外資" : who === "trust" ? "投信" : "法人"}{dir === "buy" ? "買" : "賣"}最多的板塊（累計買賣超張數，只呈現事實、不構成投資建議）
       </div>
 
       {list.length === 0 ? (
@@ -3014,13 +3035,14 @@ function TabFlows({ inst, priceMap, watchlist, loading, error }) {
         <>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 14, fontSize: 12, color: "#888", marginBottom: 6, paddingRight: 2 }}>
             <span>板塊漲跌</span>
-            <span>{dayCount} 日淨{dir === "buy" ? "買" : "賣"}超</span>
+            <span>{who === "foreign" ? "外資" : who === "trust" ? "投信" : ""}{dayCount} 日淨{dir === "buy" ? "買" : "賣"}超</span>
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             {list.map((f, i) => {
               const isOpen = open === f.name;
-              const barW = (Math.abs(f.total) / maxAbs) * 100;
+              const fv = getVal(f);
+              const barW = (Math.abs(fv) / maxAbs) * 100;
               const dotCol = f.avgPct > 0.5 ? "#ef4444" : f.avgPct < -0.5 ? "#22c55e" : "#eab308";
               return (
                 <div key={f.name} style={{ borderBottom: "1px solid #141414" }}>
@@ -3035,14 +3057,14 @@ function TabFlows({ inst, priceMap, watchlist, loading, error }) {
                         {f.avgPct !== null ? `${f.avgPct > 0 ? "+" : ""}${f.avgPct.toFixed(1)}%` : "—"}
                       </span>
                       <div style={{ minWidth: 86, textAlign: "right" }}>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: col(f.total) }}>{fmtLots(f.total)}</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: col(fv) }}>{fmtLots(fv)}</div>
                         <div style={{ height: 3, background: "#1a1a1a", borderRadius: 2, marginTop: 4 }}>
-                          <div style={{ height: 3, width: `${barW}%`, background: col(f.total), borderRadius: 2, marginLeft: "auto" }} />
+                          <div style={{ height: 3, width: `${barW}%`, background: col(fv), borderRadius: 2, marginLeft: "auto" }} />
                         </div>
                       </div>
                     </div>
                     <div style={{ fontSize: 13, color: "#888", marginTop: 5, paddingLeft: 34 }}>
-                      今日 <span style={{ color: col(f.today) }}>{fmtLots(f.today)}</span>
+                      今日 <span style={{ color: col(getToday(f)) }}>{fmtLots(getToday(f))}</span>
                       　·　{f.buyCount}/{f.members.length} 檔在{dir === "buy" ? "買" : "賣"}
                       　·　主力 {f.leader?.name}
                     </div>
@@ -3050,9 +3072,11 @@ function TabFlows({ inst, priceMap, watchlist, loading, error }) {
 
                   {isOpen && (
                     <div style={{ padding: "8px 8px 14px 20px", background: "#131313" }}>
-                      <div style={{ fontSize: 13, color: "#aaa", marginBottom: 8 }}>成分股買賣超（張）</div>
+                      <div style={{ fontSize: 13, color: "#aaa", marginBottom: 8 }}>成分股{who === "foreign" ? "外資" : who === "trust" ? "投信" : "法人"}買賣超（張）</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        {f.members.slice(0, 10).map(m => (
+                        {[...f.members].sort((a, b) => getMemberVal(b) - getMemberVal(a)).slice(0, 10).map(m => {
+                          const mv = getMemberVal(m);
+                          return (
                           <div key={m.code} style={{ background: "#0d0d0d", borderRadius: 8, padding: "10px 10px 8px" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                               <span style={{ fontSize: 15, fontWeight: 600, color: "#e5e5e5" }}>{m.name}</span>
@@ -3060,14 +3084,17 @@ function TabFlows({ inst, priceMap, watchlist, loading, error }) {
                               <span style={{ fontSize: 14, color: col(m.pct ?? 0), marginLeft: "auto" }}>
                                 {m.pct !== null ? `${m.pct > 0 ? "+" : ""}${m.pct.toFixed(1)}%` : "—"}
                               </span>
-                              <span style={{ fontSize: 15, fontWeight: 700, color: col(m.flow) }}>
-                                {fmtLots(m.flow)}
+                              <span style={{ fontSize: 15, fontWeight: 700, color: col(mv) }}>
+                                {fmtLots(mv)}
                               </span>
                             </div>
                             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                               <span style={{ fontSize: 13, color: "#999" }}>
-                                外資 <span style={{ color: col(m.foreign) }}>{m.foreign > 0 ? "+" : ""}{m.foreign.toLocaleString()}</span>
-                                {m.trust !== 0 && <> · 投信 <span style={{ color: col(m.trust) }}>{m.trust > 0 ? "+" : ""}{m.trust.toLocaleString()}</span></>}
+                                {who !== "foreign" && <>外資 <span style={{ color: col(m.foreign) }}>{m.foreign > 0 ? "+" : ""}{m.foreign.toLocaleString()}</span></>}
+                                {who !== "foreign" && who !== "trust" && m.trust !== 0 && " · "}
+                                {who !== "trust" && m.trust !== 0 && <>投信 <span style={{ color: col(m.trust) }}>{m.trust > 0 ? "+" : ""}{m.trust.toLocaleString()}</span></>}
+                                {who === "foreign" && <>合計 <span style={{ color: col(m.flow) }}>{m.flow > 0 ? "+" : ""}{m.flow.toLocaleString()}</span> · 投信 <span style={{ color: col(m.trust) }}>{m.trust > 0 ? "+" : ""}{m.trust.toLocaleString()}</span></>}
+                                {who === "trust" && <>合計 <span style={{ color: col(m.flow) }}>{m.flow > 0 ? "+" : ""}{m.flow.toLocaleString()}</span> · 外資 <span style={{ color: col(m.foreign) }}>{m.foreign > 0 ? "+" : ""}{m.foreign.toLocaleString()}</span></>}
                               </span>
                               <button onClick={(e) => { e.stopPropagation(); watchlist.add({ id: m.code, name: m.name }); }}
                                 disabled={watchlist.has(m.code)}
@@ -3077,7 +3104,8 @@ function TabFlows({ inst, priceMap, watchlist, loading, error }) {
                               </button>
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
