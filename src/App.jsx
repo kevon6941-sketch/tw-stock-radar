@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 
 // --- 動能訊號定義（技術面評分，非進場建議）---
 // 內部 key 沿用原字串以相容既有 localStorage 資料
@@ -3899,7 +3899,7 @@ export default function App() {
   }, []);
 
   // 法人分頁用的價格 map：優先用 allPriceMap（掃描時的完整資料），fallback 用 stocks 建的 map
-  const flowPriceMap = React.useMemo(() => {
+  const flowPriceMap = useMemo(() => {
     if (allPriceMap) return allPriceMap;
     if (stocks.length === 0) return null;
     const m = {};
