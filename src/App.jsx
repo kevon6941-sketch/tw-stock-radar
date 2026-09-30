@@ -139,6 +139,82 @@ const US_INDEXES = {
   "^SOX": { name: "費城半導體", note: "與台股電子股連動最強" },
 };
 
+// --- 三大法人買賣超（證交所 T86，由 GitHub Action 每日累積）---
+async function fetchInstitutional() {
+  const base = import.meta.env.BASE_URL || "/";
+  const r = await fetch(`${base}data/institutional.json`);
+  if (!r.ok) throw new Error("讀取失敗");
+  const j = await r.json();
+  if (!j?.dates?.length) throw new Error("無資料");
+  return j;
+}
+
+// 取某檔股票在指定天數內的法人買賣超（張）
+function instSum(inst, code, days) {
+  const arr = inst?.data?.[code];
+  if (!arr?.length) return null;
+  const slice = arr.slice(-days);
+  let total = 0, foreign = 0, trust = 0, hasData = false;
+  for (const v of slice) {
+    if (!v) continue;
+    hasData = true;
+    total += v[0] || 0;
+    foreign += v[1] || 0;
+    trust += v[2] || 0;
+  }
+  return hasData ? { total, foreign, trust } : null;
+}
+
+// 以「題材板塊」彙總法人買賣超
+function aggregateSectorFlows(inst, priceMap, days) {
+  if (!inst?.dates?.length) return [];
+
+  const groups = {};
+  const ensure = (name) => {
+    if (!groups[name]) groups[name] = { name, total: 0, today: 0, members: [], buyCount: 0 };
+    return groups[name];
+  };
+
+  for (const code of Object.keys(inst.data)) {
+    const flow = instSum(inst, code, days);
+    if (!flow) continue;
+    const todayFlow = instSum(inst, code, 1);
+    const p = priceMap?.[code];
+
+    // 一檔股票可屬於多個題材，另外也計入產業別
+    const names = [...getThemes(code)];
+    if (names.length === 0) names.push(getSector(code));
+
+    for (const n of names) {
+      const g = ensure(n);
+      g.total += flow.total;
+      g.today += todayFlow?.total || 0;
+      if (flow.total > 0) g.buyCount++;
+      g.members.push({
+        code,
+        name: p?.name || code,
+        flow: flow.total,
+        foreign: flow.foreign,
+        trust: flow.trust,
+        pct: p?.pct ?? null,
+        close: p?.close ?? null,
+      });
+    }
+  }
+
+  return Object.values(groups)
+    .filter(g => g.members.length >= 2)
+    .map(g => {
+      g.members.sort((a, b) => b.flow - a.flow);
+      // 板塊漲跌：成員平均
+      const withPct = g.members.filter(m => m.pct !== null);
+      g.avgPct = withPct.length ? withPct.reduce((s, m) => s + m.pct, 0) / withPct.length : null;
+      g.leader = g.members[0];
+      return g;
+    })
+    .sort((a, b) => b.total - a.total);
+}
+
 async function fetchUSMarket() {
   const base = import.meta.env.BASE_URL || "/";
   const r = await fetch(`${base}data/us_market.json`);
@@ -2840,6 +2916,183 @@ ${ctx}
 // ====================================
 // TAB: 排行榜
 // ====================================
+// ====================================
+// TAB: 法人動向（板塊買賣超）
+// ====================================
+function TabFlows({ inst, priceMap, watchlist, loading }) {
+  const [days, setDays] = useState(5);
+  const [dir, setDir] = useState("buy");
+  const [open, setOpen] = useState(null);
+
+  const flows = inst ? aggregateSectorFlows(inst, priceMap, days) : [];
+  const list = (dir === "buy" ? flows.filter(f => f.total > 0)
+                              : flows.filter(f => f.total < 0).reverse()).slice(0, 12);
+
+  const maxAbs = list.length ? Math.max(...list.map(f => Math.abs(f.total))) : 1;
+  const col = v => v > 0 ? "#ef4444" : v < 0 ? "#22c55e" : "#999";
+  const fmtLots = v => {
+    const a = Math.abs(v);
+    if (a >= 10000) return `${v > 0 ? "+" : "-"}${(a / 10000).toFixed(1)} 萬張`;
+    return `${v > 0 ? "+" : "-"}${a.toLocaleString()} 張`;
+  };
+  const lastDate = inst?.dates?.[inst.dates.length - 1];
+  const fmtDate = d => d ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : "";
+  const dayCount = Math.min(days, inst?.dates?.length || 0);
+
+  if (loading) {
+    return (
+      <div style={{ padding: 40, textAlign: "center", background: "#111", borderRadius: 12, border: "1px solid #1e1e1e" }}>
+        <div style={{ display: "inline-block", width: 32, height: 32, border: "3px solid #222", borderTopColor: "#ef4444", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+        <div style={{ marginTop: 12, fontSize: 15, color: "#ccc" }}>讀取法人買賣超資料…</div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+      </div>
+    );
+  }
+
+  if (!inst) {
+    return (
+      <div style={{ padding: 30, background: "#111", borderRadius: 12, border: "1px solid #1e1e1e" }}>
+        <div style={{ fontSize: 16, color: "#ccc", marginBottom: 8 }}>尚無法人資料</div>
+        <div style={{ fontSize: 14, color: "#999", lineHeight: 1.8 }}>
+          這份資料由 GitHub Action 每日從證交所抓取並累積。
+          請到 repo 的 Actions 頁面手動執行一次「Fetch Market Data」，
+          資料產生後重新整理即可看到。
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>法人動向</div>
+        <div style={{ fontSize: 13, color: "#999", marginTop: 2 }}>
+          資料日期 {fmtDate(lastDate)}　·　已累積 {inst.dates.length} 個交易日
+        </div>
+      </div>
+
+      {/* 買超 / 賣超 */}
+      <div style={{ display: "flex", background: "#111", borderRadius: 9, padding: 3, marginBottom: 8, border: "1px solid #1a1a1a" }}>
+        {[["buy", "買超"], ["sell", "賣超"]].map(([k, l]) => (
+          <button key={k} onClick={() => { setDir(k); setOpen(null); }}
+            style={{ flex: 1, padding: "8px 0", borderRadius: 7, border: "none", cursor: "pointer", fontSize: 14,
+              fontWeight: dir === k ? 700 : 400,
+              background: dir === k ? (k === "buy" ? "rgba(239,68,68,0.14)" : "rgba(34,197,94,0.14)") : "transparent",
+              color: dir === k ? (k === "buy" ? "#ef4444" : "#22c55e") : "#888" }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {/* 當日 / 5日 / 20日 */}
+      <div style={{ display: "flex", background: "#111", borderRadius: 9, padding: 3, marginBottom: 10, border: "1px solid #1a1a1a" }}>
+        {[[1, "當日"], [5, "5 日"], [20, "20 日"]].map(([n, l]) => {
+          const enough = (inst.dates.length || 0) >= n;
+          return (
+            <button key={n} onClick={() => { setDays(n); setOpen(null); }} disabled={!enough}
+              style={{ flex: 1, padding: "8px 0", borderRadius: 7, border: "none",
+                cursor: enough ? "pointer" : "not-allowed", fontSize: 14,
+                fontWeight: days === n ? 700 : 400,
+                background: days === n ? "#1f1f1f" : "transparent",
+                color: !enough ? "#555" : days === n ? "#f97316" : "#888" }}>
+              {l}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ background: "#0d0d0d", borderLeft: "3px solid #f97316", borderRadius: 6, padding: "9px 11px", marginBottom: 12, fontSize: 13, color: "#bbb", lineHeight: 1.7 }}>
+        近 {dayCount} 個交易日法人{dir === "buy" ? "買" : "賣"}最多的板塊（累計買賣超張數，只呈現事實、不構成投資建議）
+      </div>
+
+      {list.length === 0 ? (
+        <div style={{ padding: 32, textAlign: "center", color: "#999", fontSize: 15 }}>
+          目前沒有{dir === "buy" ? "買" : "賣"}超板塊
+        </div>
+      ) : (
+        <>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 14, fontSize: 12, color: "#888", marginBottom: 6, paddingRight: 2 }}>
+            <span>板塊漲跌</span>
+            <span>{dayCount} 日淨{dir === "buy" ? "買" : "賣"}超</span>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            {list.map((f, i) => {
+              const isOpen = open === f.name;
+              const barW = (Math.abs(f.total) / maxAbs) * 100;
+              const dotCol = f.avgPct > 0.5 ? "#ef4444" : f.avgPct < -0.5 ? "#22c55e" : "#eab308";
+              return (
+                <div key={f.name} style={{ borderBottom: "1px solid #141414" }}>
+                  <button onClick={() => setOpen(isOpen ? null : f.name)}
+                    style={{ width: "100%", background: isOpen ? "#131313" : "none", border: "none",
+                      padding: "12px 6px 10px", cursor: "pointer", textAlign: "left" }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                      <span style={{ fontSize: 15, color: "#888", minWidth: 16, textAlign: "center", marginTop: 1 }}>{i + 1}</span>
+                      <span style={{ width: 8, height: 8, borderRadius: 4, background: dotCol, flexShrink: 0, marginTop: 6 }} />
+                      <span style={{ flex: 1, fontSize: 17, fontWeight: 600, color: "#e5e5e5" }}>{f.name}</span>
+                      <span style={{ fontSize: 16, fontWeight: 700, color: col(f.avgPct ?? 0), minWidth: 62, textAlign: "right", marginTop: 1 }}>
+                        {f.avgPct !== null ? `${f.avgPct > 0 ? "+" : ""}${f.avgPct.toFixed(1)}%` : "—"}
+                      </span>
+                      <div style={{ minWidth: 86, textAlign: "right" }}>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: col(f.total) }}>{fmtLots(f.total)}</div>
+                        <div style={{ height: 3, background: "#1a1a1a", borderRadius: 2, marginTop: 4 }}>
+                          <div style={{ height: 3, width: `${barW}%`, background: col(f.total), borderRadius: 2, marginLeft: "auto" }} />
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 13, color: "#888", marginTop: 5, paddingLeft: 34 }}>
+                      今日 <span style={{ color: col(f.today) }}>{fmtLots(f.today)}</span>
+                      　·　{f.buyCount}/{f.members.length} 檔在{dir === "buy" ? "買" : "賣"}
+                      　·　主力 {f.leader?.name}
+                    </div>
+                  </button>
+
+                  {isOpen && (
+                    <div style={{ padding: "4px 6px 12px 34px", background: "#131313" }}>
+                      <div style={{ fontSize: 13, color: "#888", marginBottom: 6 }}>成分股買賣超（張）</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                        {f.members.slice(0, 10).map(m => (
+                          <div key={m.code} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
+                            <span style={{ minWidth: 92, color: "#ddd" }}>
+                              {m.name} <span style={{ fontSize: 12, color: "#888" }}>{m.code}</span>
+                            </span>
+                            <span style={{ minWidth: 54, textAlign: "right", color: col(m.pct ?? 0), fontSize: 13 }}>
+                              {m.pct !== null ? `${m.pct > 0 ? "+" : ""}${m.pct.toFixed(1)}%` : "—"}
+                            </span>
+                            <span style={{ flex: 1, textAlign: "right", fontWeight: 600, color: col(m.flow) }}>
+                              {fmtLots(m.flow)}
+                            </span>
+                            <span style={{ fontSize: 12, color: "#888", minWidth: 96, textAlign: "right" }}>
+                              外資 {m.foreign > 0 ? "+" : ""}{m.foreign.toLocaleString()}
+                              {m.trust !== 0 && <>　投信 {m.trust > 0 ? "+" : ""}{m.trust.toLocaleString()}</>}
+                            </span>
+                            <button onClick={(e) => { e.stopPropagation(); watchlist.add({ id: m.code, name: m.name }); }}
+                              disabled={watchlist.has(m.code)}
+                              style={{ padding: "2px 8px", borderRadius: 5, border: "1px solid #2a2a2a", background: "#0d0d0d",
+                                color: watchlist.has(m.code) ? "#666" : "#f59e0b", fontSize: 12, cursor: "pointer", flexShrink: 0 }}>
+                              {watchlist.has(m.code) ? "已追蹤" : "追蹤"}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      <div style={{ fontSize: 12, color: "#777", marginTop: 14, lineHeight: 1.7 }}>
+        資料來源：臺灣證券交易所三大法人買賣日報表（T86），單位為張。
+        板塊依題材與產業分類彙總，一檔股票可能同時屬於多個板塊。
+        法人買超不代表股價必漲，僅供參考。
+      </div>
+    </div>
+  );
+}
+
 function TabRanking({ stocks, watchlist, scanCount, lastScan, scan, scanning }) {
   const [rankType, setRankType] = useState("gain");
   const [selected, setSelected] = useState(null);
@@ -3518,6 +3771,15 @@ export default function App() {
   });
 
   const [usRows, setUsRows] = useState(null);
+  const [inst, setInst] = useState(null);
+  const [instLoading, setInstLoading] = useState(true);
+  const [flowPrices, setFlowPrices] = useState(null);
+
+  const fetchInst = async () => {
+    setInstLoading(true);
+    try { setInst(await fetchInstitutional()); } catch { setInst(null); }
+    setInstLoading(false);
+  };
 
   const fetchUS = async () => {
     try { setUsRows(await fetchUSMarket()); } catch {}
@@ -3578,6 +3840,7 @@ export default function App() {
       });
 
       setStocks(scored);
+      setFlowPrices(fullMap);
       setScanCount(tradable.length);
 
       // 抓本益比、殖利率（失敗不影響主流程）
@@ -3629,6 +3892,7 @@ export default function App() {
     if (stocks.length === 0 || stale) scan();
     if (!index || stale) fetchIndex();
     fetchUS();
+    fetchInst();
   }, []);
 
   const scanState = { stocks, scanning, scanError, lastScan, scan, scanCount, valuation, usRows };
@@ -3688,11 +3952,12 @@ export default function App() {
             { key: "buy", label: "強勢" },
             { key: "sell", label: "弱勢" },
             { key: "rank", label: "排行" },
+            { key: "flows", label: "法人" },
           ].map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
-              style={{ flex: 1, padding: "7px 1px", borderRadius: 7, border: "none", cursor: "pointer", fontSize: 13, fontWeight: tab === t.key ? 600 : 400, transition: "all 0.2s",
+              style={{ flex: 1, padding: "8px 1px", borderRadius: 7, border: "none", cursor: "pointer", fontSize: 12.5, whiteSpace: "nowrap", fontWeight: tab === t.key ? 600 : 400, transition: "all 0.2s",
                 background: tab === t.key ? "#1f1f1f" : "transparent",
-                color: tab === t.key ? (t.key === "sell" ? "#22c55e" : t.key === "buy" ? "#ef4444" : t.key === "watchlist" ? "#f59e0b" : t.key === "rank" ? "#60a5fa" : "#f97316") : "#555" }}>
+                color: tab === t.key ? (t.key === "sell" ? "#22c55e" : t.key === "buy" ? "#ef4444" : t.key === "watchlist" ? "#f59e0b" : t.key === "rank" ? "#60a5fa" : t.key === "flows" ? "#a78bfa" : "#f97316") : "#555" }}>
               {t.label}
             </button>
           ))}
@@ -3714,6 +3979,7 @@ export default function App() {
         {tab === "watchlist" && <TabWatchlist watchlist={watchlist} apiKey={apiKey} priceMap={priceMap} />}
         {tab === "buy" && <TabScan mode="buy" watchlist={watchlist} scanState={scanState} />}
         {tab === "sell" && <TabScan mode="sell" watchlist={watchlist} scanState={scanState} />}
+        {tab === "flows" && <TabFlows inst={inst} priceMap={flowPrices} watchlist={watchlist} loading={instLoading} />}
         {tab === "rank" && <TabRanking stocks={stocks} watchlist={watchlist} scanCount={scanCount} lastScan={lastScan} scan={scan} scanning={scanning} />}
 
         {/* Footer */}
