@@ -307,7 +307,7 @@ function USLinkagePanel({ usRows, onPickTheme }) {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 5, marginBottom: 12 }}>
               {indexes.map(r => (
                 <div key={r.sym} style={{ background: "#0a0a0a", borderRadius: 6, padding: "7px 4px", textAlign: "center" }}>
-                  <div style={{ fontSize: 11, color: "#888" }}>{US_INDEXES[r.sym].name}</div>
+                  <div style={{ fontSize: 12, color: "#888" }}>{US_INDEXES[r.sym].name}</div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: col(r.pct) }}>
                     {r.pct !== null ? `${r.pct > 0 ? "+" : ""}${r.pct.toFixed(2)}%` : "—"}
                   </div>
@@ -368,7 +368,7 @@ function USLinkagePanel({ usRows, onPickTheme }) {
             </>
           )}
 
-          <div style={{ fontSize: 11, color: "#777", marginTop: 10, lineHeight: 1.6 }}>
+          <div style={{ fontSize: 12, color: "#777", marginTop: 10, lineHeight: 1.6 }}>
             連動僅為產業關聯推論，台股實際走勢仍受本地籌碼與消息面影響。
           </div>
         </div>
@@ -616,14 +616,14 @@ function TradePlanner({ stock, levels }) {
                 </span>
                 <span style={{ fontSize: 13, color: "#ccc", lineHeight: 1.6, flex: 1 }}>
                   {c.text}
-                  {isAuto && <span style={{ fontSize: 11, color: "#777" }}>（自動判斷）</span>}
+                  {isAuto && <span style={{ fontSize: 12, color: "#777" }}>（自動判斷）</span>}
                 </span>
               </button>
             );
           })}
         </div>
 
-        <div style={{ fontSize: 11, color: "#777", marginTop: 10, lineHeight: 1.6 }}>
+        <div style={{ fontSize: 12, color: "#777", marginTop: 10, lineHeight: 1.6 }}>
           檢核只是幫你放慢速度思考，不代表通過就一定會賺。資料為前一交易日收盤，實際下單請以券商即時報價為準。
         </div>
       </div>
@@ -670,7 +670,7 @@ function LevelsPanel({ levels }) {
           );
         })}
       </div>
-      <div style={{ fontSize: 11, color: "#777", marginTop: 9, lineHeight: 1.6 }}>
+      <div style={{ fontSize: 12, color: "#777", marginTop: 9, lineHeight: 1.6 }}>
         壓力位是上漲時可能遇到賣壓的價格，支撐位是下跌時可能有買盤承接的價格。跌破最近支撐通常是停損訊號。
       </div>
     </div>
@@ -908,7 +908,7 @@ function EntryAssessment({ assess, code, name }) {
             {assess.failed.map(c => (
               <div key={c.key} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
                 <span style={{ minWidth: 17, height: 17, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center",
-                  border: "1px solid #ef444455", color: "#ef4444", fontSize: 11, fontWeight: 700, flexShrink: 0, marginTop: 2 }}>✗</span>
+                  border: "1px solid #ef444455", color: "#ef4444", fontSize: 12, fontWeight: 700, flexShrink: 0, marginTop: 2 }}>✗</span>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 14, color: "#ddd" }}>{c.title}</div>
                   <div style={{ fontSize: 12, color: "#999", lineHeight: 1.6, marginTop: 1 }}>{c.detail}</div>
@@ -939,7 +939,7 @@ function EntryAssessment({ assess, code, name }) {
                     <div key={c.key} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
                       <span style={{ minWidth: 17, height: 17, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center",
                         border: `1px solid ${c.pass ? "#22c55e55" : "#ef444455"}`, color: c.pass ? "#22c55e" : "#ef4444",
-                        fontSize: 11, fontWeight: 700, flexShrink: 0, marginTop: 2 }}>
+                        fontSize: 12, fontWeight: 700, flexShrink: 0, marginTop: 2 }}>
                         {c.pass ? "✓" : "✗"}
                       </span>
                       <div style={{ flex: 1 }}>
@@ -1000,7 +1000,7 @@ function EntryAssessment({ assess, code, name }) {
         )}
       </div>
 
-      <div style={{ fontSize: 11, color: "#777", marginTop: 10, lineHeight: 1.7 }}>
+      <div style={{ fontSize: 12, color: "#777", marginTop: 10, lineHeight: 1.7 }}>
         本評估僅涵蓋技術面與估值，未包含法人籌碼、財報細節與消息面。資料為前一交易日收盤，僅供參考，不構成投資建議。
       </div>
     </div>
@@ -1551,7 +1551,7 @@ function ChartToggle({ data }) {
         <div style={{ background: "#0a0a0a", borderRadius: 8, padding: "10px 4px 6px", marginTop: 8 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 8px", marginBottom: 4 }}>
             <span style={{ fontSize: 13, color: "#ccc", fontWeight: 600 }}>K 線圖</span>
-            <span style={{ fontSize: 11, color: "#999" }}>
+            <span style={{ fontSize: 12, color: "#999" }}>
               <span style={{ color: "#ef4444" }}>■</span> 紅K　
               <span style={{ color: "#22c55e" }}>■</span> 黑K　
               <span style={{ color: "#f59e0b" }}>—</span> 5MA
@@ -1752,10 +1752,10 @@ function FilterRow({ label, options, values, onToggle, onClear, last }) {
           const on = values.includes(o.key);
           return (
             <button key={String(o.key)} onClick={() => onToggle(o.key)}
-              style={{ padding: "4px 10px", fontSize: 13, borderRadius: 8, cursor: "pointer",
-                border: on ? "1px solid #f97316" : "1px solid #222",
+              style={{ padding: "6px 12px", fontSize: 13, borderRadius: 8, cursor: "pointer",
+                border: on ? "1px solid #f97316" : "1px solid #252525",
                 background: on ? "#1a1510" : "#111",
-                color: on ? "#f97316" : "#999" }}>
+                color: on ? "#f97316" : "#bbb" }}>
               {on ? "✓ " : ""}{o.label}
             </button>
           );
@@ -1958,7 +1958,7 @@ function ScoreBreakdown({ detail, score, verdict, mode, risk, zones }) {
           {mode === "deep" ? "深度分析" : "當日快篩"}
         </span>
       </div>
-      <div style={{ fontSize: 12, color: "#999", background: "#111", borderRadius: 6, padding: "6px 9px", marginBottom: 10, lineHeight: 1.6 }}>
+      <div style={{ fontSize: 13, color: "#aaa", background: "#111", borderRadius: 6, padding: "7px 10px", marginBottom: 10, lineHeight: 1.6 }}>
         這是技術面動能評分，不是進場建議。分數高代表近期買盤強，但不代表現在這個價位適合買。
       </div>
 
@@ -2021,26 +2021,26 @@ function ScoreBreakdown({ detail, score, verdict, mode, risk, zones }) {
             const isCur = verdict === name;
             return (
               <div key={name} style={{
-                flex: 1, textAlign: "center", padding: "4px 0", borderRadius: 5, fontSize: 11,
+                flex: 1, textAlign: "center", padding: "4px 0", borderRadius: 5, fontSize: 12,
                 background: isCur ? vc + "22" : "#111",
                 color: isCur ? vc : "#777",
                 border: isCur ? `1px solid ${vc}66` : "1px solid #1a1a1a",
                 fontWeight: isCur ? 700 : 400,
               }}>
                 <div>{tierLabel(name)}</div>
-                <div style={{ fontSize: 10, marginTop: 1 }}>≥{min}</div>
+                <div style={{ fontSize: 11, marginTop: 1 }}>≥{min}</div>
               </div>
             );
           })}
           <div style={{
-            flex: 1, textAlign: "center", padding: "4px 0", borderRadius: 5, fontSize: 11,
+            flex: 1, textAlign: "center", padding: "4px 0", borderRadius: 5, fontSize: 12,
             background: verdict === "強力賣出" ? "#16a34a22" : "#111",
             color: verdict === "強力賣出" ? "#16a34a" : "#777",
             border: verdict === "強力賣出" ? "1px solid #16a34a66" : "1px solid #1a1a1a",
             fontWeight: verdict === "強力賣出" ? 700 : 400,
           }}>
             <div>{sigLabel("強力賣出")}</div>
-            <div style={{ fontSize: 10, marginTop: 1 }}>更低</div>
+            <div style={{ fontSize: 11, marginTop: 1 }}>更低</div>
           </div>
         </div>
       </div>
@@ -2487,7 +2487,7 @@ function TabDiagnosis({ watchlist, apiKey, stocks }) {
           {result.finScores && Object.keys(result.finScores).length > 0 && (
             <div style={{ padding: "14px 10px 12px", marginBottom: 12, background: "#0d0d0d", borderRadius: 10, border: "1px solid #1a1a1a" }}>
               <div style={{ fontSize: 14, color: "#aaa", marginBottom: 10, paddingLeft: 4 }}>財報健檢評分</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(56px, 1fr))", gap: 6 }}>
                 {[
                   ["revenue", "營收", "營收成長力"],
                   ["eps", "EPS", "每股盈餘"],
@@ -2500,7 +2500,7 @@ function TabDiagnosis({ watchlist, apiKey, stocks }) {
                   </div>
                 ))}
               </div>
-              <div style={{ fontSize: 12, color: "#888", marginTop: 8, textAlign: "center" }}>
+              <div style={{ fontSize: 13, color: "#999", marginTop: 8, textAlign: "center" }}>
                 分數越高越好 · 70以上綠燈、40以下紅燈
               </div>
             </div>
@@ -2717,10 +2717,10 @@ ${ctx}
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#86efac", marginBottom: 3 }}>
                   {downs.length} 檔訊號轉弱
                 </div>
-                <div style={{ fontSize: 12, color: "#ccc", lineHeight: 1.6 }}>
+                <div style={{ fontSize: 13, color: "#ccc", lineHeight: 1.6 }}>
                   {downs.map(d => `${d.name || d.id}（${sigLabel(d.change.from)}→${sigLabel(d.change.to)}）`).join("、")}
                 </div>
-                <div style={{ fontSize: 11, color: "#999", marginTop: 4 }}>
+                <div style={{ fontSize: 13, color: "#aaa", marginTop: 4 }}>
                   持有中的可考慮減碼或確認停損位是否被跌破
                 </div>
               </div>
@@ -2730,7 +2730,7 @@ ${ctx}
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#fca5a5", marginBottom: 3 }}>
                   {ups.length} 檔訊號轉強
                 </div>
-                <div style={{ fontSize: 12, color: "#ccc", lineHeight: 1.6 }}>
+                <div style={{ fontSize: 13, color: "#ccc", lineHeight: 1.6 }}>
                   {ups.map(d => `${d.name || d.id}（${sigLabel(d.change.from)}→${sigLabel(d.change.to)}）`).join("、")}
                 </div>
               </div>
@@ -2789,7 +2789,7 @@ ${ctx}
                       {sigLabel(verdict)}
                     </div>
                     {item.change && (
-                      <span style={{ fontSize: 11, color: item.change.direction === "up" ? "#ef4444" : "#22c55e", whiteSpace: "nowrap" }}>
+                      <span style={{ fontSize: 12, color: item.change.direction === "up" ? "#ef4444" : "#22c55e", whiteSpace: "nowrap" }}>
                         {sigLabel(item.change.from)} → {sigLabel(item.change.to)}
                       </span>
                     )}
@@ -2884,7 +2884,7 @@ ${ctx}
 
                     {/* AI 深度分析 */}
                     {ai && (
-                      <div style={{ background: "#0a0a0a", borderRadius: 8, padding: 12, fontSize: 15, lineHeight: 1.9, color: "#bbb", whiteSpace: "pre-wrap", borderLeft: "3px solid #f97316", marginBottom: 10 }}>
+                      <div style={{ background: "#0a0a0a", borderRadius: 8, padding: "12px 14px", fontSize: 15, lineHeight: 1.9, color: "#ccc", whiteSpace: "pre-wrap", borderLeft: "3px solid #f97316", marginBottom: 10 }}>
                         {ai.text}
                         {ai.time && <div style={{ fontSize: 12, color: "#777", marginTop: 6 }}>{ai.time}</div>}
                       </div>
@@ -3049,30 +3049,33 @@ function TabFlows({ inst, priceMap, watchlist, loading, error }) {
                   </button>
 
                   {isOpen && (
-                    <div style={{ padding: "4px 6px 12px 34px", background: "#131313" }}>
-                      <div style={{ fontSize: 13, color: "#888", marginBottom: 6 }}>成分股買賣超（張）</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                    <div style={{ padding: "8px 8px 14px 20px", background: "#131313" }}>
+                      <div style={{ fontSize: 13, color: "#aaa", marginBottom: 8 }}>成分股買賣超（張）</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                         {f.members.slice(0, 10).map(m => (
-                          <div key={m.code} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
-                            <span style={{ minWidth: 92, color: "#ddd" }}>
-                              {m.name} <span style={{ fontSize: 12, color: "#888" }}>{m.code}</span>
-                            </span>
-                            <span style={{ minWidth: 54, textAlign: "right", color: col(m.pct ?? 0), fontSize: 13 }}>
-                              {m.pct !== null ? `${m.pct > 0 ? "+" : ""}${m.pct.toFixed(1)}%` : "—"}
-                            </span>
-                            <span style={{ flex: 1, textAlign: "right", fontWeight: 600, color: col(m.flow) }}>
-                              {fmtLots(m.flow)}
-                            </span>
-                            <span style={{ fontSize: 12, color: "#888", minWidth: 96, textAlign: "right" }}>
-                              外資 {m.foreign > 0 ? "+" : ""}{m.foreign.toLocaleString()}
-                              {m.trust !== 0 && <>　投信 {m.trust > 0 ? "+" : ""}{m.trust.toLocaleString()}</>}
-                            </span>
-                            <button onClick={(e) => { e.stopPropagation(); watchlist.add({ id: m.code, name: m.name }); }}
-                              disabled={watchlist.has(m.code)}
-                              style={{ padding: "2px 8px", borderRadius: 5, border: "1px solid #2a2a2a", background: "#0d0d0d",
-                                color: watchlist.has(m.code) ? "#666" : "#f59e0b", fontSize: 12, cursor: "pointer", flexShrink: 0 }}>
-                              {watchlist.has(m.code) ? "已追蹤" : "追蹤"}
-                            </button>
+                          <div key={m.code} style={{ background: "#0d0d0d", borderRadius: 8, padding: "10px 10px 8px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                              <span style={{ fontSize: 15, fontWeight: 600, color: "#e5e5e5" }}>{m.name}</span>
+                              <span style={{ fontSize: 13, color: "#999" }}>{m.code}</span>
+                              <span style={{ fontSize: 14, color: col(m.pct ?? 0), marginLeft: "auto" }}>
+                                {m.pct !== null ? `${m.pct > 0 ? "+" : ""}${m.pct.toFixed(1)}%` : "—"}
+                              </span>
+                              <span style={{ fontSize: 15, fontWeight: 700, color: col(m.flow) }}>
+                                {fmtLots(m.flow)}
+                              </span>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ fontSize: 13, color: "#999" }}>
+                                外資 <span style={{ color: col(m.foreign) }}>{m.foreign > 0 ? "+" : ""}{m.foreign.toLocaleString()}</span>
+                                {m.trust !== 0 && <> · 投信 <span style={{ color: col(m.trust) }}>{m.trust > 0 ? "+" : ""}{m.trust.toLocaleString()}</span></>}
+                              </span>
+                              <button onClick={(e) => { e.stopPropagation(); watchlist.add({ id: m.code, name: m.name }); }}
+                                disabled={watchlist.has(m.code)}
+                                style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid #2a2a2a", background: "#141414",
+                                  color: watchlist.has(m.code) ? "#666" : "#f59e0b", fontSize: 13, cursor: "pointer", flexShrink: 0, marginLeft: "auto" }}>
+                                {watchlist.has(m.code) ? "已追蹤" : "追蹤"}
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -3156,14 +3159,14 @@ function TabRanking({ stocks, watchlist, scanCount, lastScan, scan, scanning }) 
                   <div style={{ width: 24, fontSize: 15, fontWeight: 700, color: i < 3 ? "#f59e0b" : "#666", textAlign: "center" }}>{i + 1}</div>
                   <div style={{ minWidth: 62 }}>
                     <div style={{ fontSize: 16, fontWeight: 700 }}>{s.name}</div>
-                    <div style={{ fontSize: 12, color: "#999" }}>{s.id} · {getSector(s.id)}</div>
+                    <div style={{ fontSize: 13, color: "#aaa" }}>{s.id} · {getSector(s.id)}</div>
                   </div>
                   <div style={{ flex: 1, textAlign: "right" }}>
                     <div style={{ fontSize: 18, fontWeight: 700, color: isUp ? "#ef4444" : "#22c55e" }}>{s.price}</div>
-                    <div style={{ fontSize: 13, color: isUp ? "#ef4444" : "#22c55e" }}>{s.change}</div>
+                    <div style={{ fontSize: 14, color: isUp ? "#ef4444" : "#22c55e" }}>{s.change}</div>
                   </div>
                   <div style={{ minWidth: 62, textAlign: "right" }}>
-                    <div style={{ fontSize: 12, color: "#888" }}>
+                    <div style={{ fontSize: 13, color: "#aaa" }}>
                       {rankType === "volume" ? "成交量" : rankType === "amp" ? "振幅" : "量"}
                     </div>
                     <div style={{ fontSize: 14, fontWeight: 600, color: "#ddd" }}>
@@ -3175,9 +3178,9 @@ function TabRanking({ stocks, watchlist, scanCount, lastScan, scan, scanning }) 
                   <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #1e1e1e" }} onClick={e => e.stopPropagation()}>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5, marginBottom: 8 }}>
                       {[["開", s.open], ["高", s.high], ["低", s.low]].map(([l, v]) => (
-                        <div key={l} style={{ background: "#0a0a0a", borderRadius: 6, padding: "6px 4px", textAlign: "center" }}>
-                          <div style={{ fontSize: 12, color: "#888" }}>{l}</div>
-                          <div style={{ fontSize: 14, fontWeight: 600, color: "#ddd" }}>{typeof v === "number" ? v.toFixed(2) : "—"}</div>
+                        <div key={l} style={{ background: "#0d0d0d", borderRadius: 6, padding: "8px 4px", textAlign: "center" }}>
+                          <div style={{ fontSize: 13, color: "#aaa" }}>{l}</div>
+                          <div style={{ fontSize: 15, fontWeight: 600, color: "#ddd" }}>{typeof v === "number" ? v.toFixed(2) : "—"}</div>
                         </div>
                       ))}
                     </div>
@@ -3440,7 +3443,7 @@ function TabScan({ mode, watchlist, scanState }) {
                         {n}
                       </button>
                     ))}
-                    <span style={{ fontSize: 11, color: "#777" }}>約 {Math.ceil(deepCount / 4) * 8} 秒</span>
+                    <span style={{ fontSize: 13, color: "#888" }}>約 {Math.ceil(deepCount / 4) * 8} 秒</span>
                   </div>
                 )}
               </div>
@@ -3582,7 +3585,7 @@ function TabScan({ mode, watchlist, scanState }) {
                       {sigLabel(stock.verdict)}
                     </div>
                     {(stock.risk || stock.deep?.risk) && (
-                      <span style={{ fontSize: 11, color: "#f59e0b", whiteSpace: "nowrap" }}>
+                      <span style={{ fontSize: 13, color: "#f59e0b", whiteSpace: "nowrap" }}>
                         {(stock.risk || stock.deep?.risk).level === "high" ? "追高風險" : "位階偏高"}
                       </span>
                     )}
@@ -3594,16 +3597,16 @@ function TabScan({ mode, watchlist, scanState }) {
                     {getThemes(stock.id).length > 0 && (
                       <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
                         {getThemes(stock.id).map(t => (
-                          <span key={t} style={{ padding: "3px 9px", borderRadius: 8, fontSize: 12, background: "#1a1510", color: "#f59e0b", border: "1px solid #f5970b33" }}>{t}</span>
+                          <span key={t} style={{ padding: "4px 10px", borderRadius: 8, fontSize: 13, background: "#1a1510", color: "#f59e0b", border: "1px solid #f5970b33" }}>{t}</span>
                         ))}
                       </div>
                     )}
                     {stock.open && (
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, marginBottom: 10 }}>
                         {[["開", stock.open], ["高", stock.high], ["低", stock.low], ["量", stock.volume ? Math.round(stock.volume / 1000) + "張" : "—"]].map(([l, v]) => (
-                          <div key={l} style={{ background: "#0a0a0a", borderRadius: 6, padding: "6px 4px", textAlign: "center" }}>
-                            <div style={{ fontSize: 12, color: "#888" }}>{l}</div>
-                            <div style={{ fontSize: 14, fontWeight: 600, color: "#ddd" }}>{typeof v === "number" ? v.toFixed(2) : v}</div>
+                          <div key={l} style={{ background: "#0a0a0a", borderRadius: 6, padding: "7px 4px", textAlign: "center" }}>
+                            <div style={{ fontSize: 13, color: "#999" }}>{l}</div>
+                            <div style={{ fontSize: 15, fontWeight: 600, color: "#ddd" }}>{typeof v === "number" ? v.toFixed(2) : v}</div>
                           </div>
                         ))}
                       </div>
@@ -3943,23 +3946,23 @@ export default function App() {
 
       <div style={{ maxWidth: 640, margin: "0 auto", padding: "0 16px 40px" }}>
         {/* Market cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, margin: "12px 0" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, margin: "12px 0" }}>
           {[
             { label: "加權指數", val: index?.value || "—", sub: index ? `${index.change} (${index.pct})` : (apiKey.hasKey ? "查詢中…" : "需設定 Key"), col: index?.pct?.startsWith("-") ? "#22c55e" : "#ef4444" },
+            { label: "自選股", val: `${watchlist.list.length}`, sub: "追蹤中", col: "#f59e0b" },
             { label: "強勢股", val: stocks.length ? `${buyCount}` : "—", sub: stocks.length ? `/ ${scanCount} 檔` : (scanning ? "掃描中…" : "待掃描"), col: "#ef4444" },
             { label: "弱勢股", val: stocks.length ? `${sellCount}` : "—", sub: stocks.length ? `/ ${scanCount} 檔` : (scanning ? "掃描中…" : "待掃描"), col: "#22c55e" },
-            { label: "自選股", val: `${watchlist.list.length}`, sub: "追蹤中", col: "#f59e0b" },
           ].map((c, i) => (
-            <div key={i} style={{ background: "#111", borderRadius: 8, padding: "7px 8px", border: "1px solid #1a1a1a" }}>
-              <div style={{ fontSize: 12, color: "#bbb" }}>{c.label}</div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: c.col }}>{c.val}</div>
-              <div style={{ fontSize: 13, color: "#bbb" }}>{c.sub}</div>
+            <div key={i} style={{ background: "#111", borderRadius: 10, padding: "10px 12px", border: "1px solid #1e1e1e" }}>
+              <div style={{ fontSize: 13, color: "#aaa", marginBottom: 2 }}>{c.label}</div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: c.col, lineHeight: 1.2 }}>{c.val}</div>
+              <div style={{ fontSize: 13, color: "#999", marginTop: 2 }}>{c.sub}</div>
             </div>
           ))}
         </div>
 
         {/* Tab nav */}
-        <div style={{ display: "flex", background: "#111", borderRadius: 10, padding: 3, marginBottom: 14, border: "1px solid #1a1a1a", gap: 2 }}>
+        <div style={{ display: "flex", background: "#111", borderRadius: 12, padding: 3, marginBottom: 14, border: "1px solid #1e1e1e", gap: 2 }}>
           {[
             { key: "search", label: "診斷" },
             { key: "watchlist", label: `自選${watchlist.list.length > 0 ? ` ${watchlist.list.length}` : ""}` },
@@ -3969,9 +3972,9 @@ export default function App() {
             { key: "flows", label: "法人" },
           ].map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
-              style={{ flex: 1, padding: "8px 1px", borderRadius: 7, border: "none", cursor: "pointer", fontSize: 12.5, whiteSpace: "nowrap", fontWeight: tab === t.key ? 600 : 400, transition: "all 0.2s",
+              style={{ flex: 1, padding: "10px 4px", borderRadius: 9, border: "none", cursor: "pointer", fontSize: 14, whiteSpace: "nowrap", fontWeight: tab === t.key ? 700 : 400, transition: "all 0.2s",
                 background: tab === t.key ? "#1f1f1f" : "transparent",
-                color: tab === t.key ? (t.key === "sell" ? "#22c55e" : t.key === "buy" ? "#ef4444" : t.key === "watchlist" ? "#f59e0b" : t.key === "rank" ? "#60a5fa" : t.key === "flows" ? "#a78bfa" : "#f97316") : "#555" }}>
+                color: tab === t.key ? (t.key === "sell" ? "#22c55e" : t.key === "buy" ? "#ef4444" : t.key === "watchlist" ? "#f59e0b" : t.key === "rank" ? "#60a5fa" : t.key === "flows" ? "#a78bfa" : "#f97316") : "#888" }}>
               {t.label}
             </button>
           ))}
