@@ -3775,6 +3775,7 @@ export default function App() {
   const [inst, setInst] = useState(null);
   const [instLoading, setInstLoading] = useState(true);
   const [instError, setInstError] = useState(null);
+  const [allPriceMap, setAllPriceMap] = useState(null);
 
   const fetchInst = async () => {
     setInstLoading(true);
@@ -3842,7 +3843,7 @@ export default function App() {
       });
 
       setStocks(scored);
-      setFlowPrices(fullMap);
+      setAllPriceMap(fullMap);
       setScanCount(tradable.length);
 
       // 抓本益比、殖利率（失敗不影響主流程）
@@ -3896,6 +3897,17 @@ export default function App() {
     fetchUS();
     fetchInst();
   }, []);
+
+  // 法人分頁用的價格 map：優先用 allPriceMap（掃描時的完整資料），fallback 用 stocks 建的 map
+  const flowPriceMap = React.useMemo(() => {
+    if (allPriceMap) return allPriceMap;
+    if (stocks.length === 0) return null;
+    const m = {};
+    for (const s of stocks) {
+      m[s.id] = { code: s.id, name: s.name, close: parseFloat(s.price) || null, pct: parseFloat(s.change) || null };
+    }
+    return m;
+  }, [allPriceMap, stocks]);
 
   const scanState = { stocks, scanning, scanError, lastScan, scan, scanCount, valuation, usRows };
   const buyCount = stocks.filter(s => s.verdict === "買進" || s.verdict === "強力買進").length;
@@ -3981,7 +3993,7 @@ export default function App() {
         {tab === "watchlist" && <TabWatchlist watchlist={watchlist} apiKey={apiKey} priceMap={priceMap} />}
         {tab === "buy" && <TabScan mode="buy" watchlist={watchlist} scanState={scanState} />}
         {tab === "sell" && <TabScan mode="sell" watchlist={watchlist} scanState={scanState} />}
-        {tab === "flows" && <TabFlows inst={inst} priceMap={priceMap} watchlist={watchlist} loading={instLoading} error={instError} />}
+        {tab === "flows" && <TabFlows inst={inst} priceMap={flowPriceMap} watchlist={watchlist} loading={instLoading} error={instError} />}
         {tab === "rank" && <TabRanking stocks={stocks} watchlist={watchlist} scanCount={scanCount} lastScan={lastScan} scan={scan} scanning={scanning} />}
 
         {/* Footer */}
